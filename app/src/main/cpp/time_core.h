@@ -6,5 +6,6 @@
 double tc_seconds_to_hours(int64_t seconds);
 double tc_expected_hours(double target_hours, int days_in_period, int days_passed);
 double tc_balance(double worked_hours, double expected_hours);
+double tc_required_daily_hours(double remaining_hours, int days_left);
 
 #endif

@@ -11,26 +11,25 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.util.Log;
 
 import java.util.Locale;
 
 public class TimerService extends Service {
-    private static final String TAG = "TimeCalendar";
-
     public static final String ACTION_START = "com.kersorus.timecalendar.START";
     public static final String ACTION_PAUSE = "com.kersorus.timecalendar.PAUSE";
     public static final String ACTION_RESUME = "com.kersorus.timecalendar.RESUME";
     public static final String ACTION_STOP = "com.kersorus.timecalendar.STOP";
 
-    public static final String EXTRA_PROFILE = "profile";
+    public static final String EXTRA_PROFILE_ID = "profile_id";
+    public static final String EXTRA_PROFILE_NAME = "profile_name";
 
     private static final String CHANNEL_ID = "timer_channel";
     private static final int NOTIFICATION_ID = 10;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
 
-    private String profile = "Работа";
+    private long profileId = 1L;
+    private String profileName = "Работа";
     private boolean running = false;
     private boolean paused = false;
 
@@ -52,19 +51,18 @@ public class TimerService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        Log.d(TAG, "TimerService.onCreate");
         createNotificationChannel();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? ACTION_START : intent.getAction();
-        Log.d(TAG, "TimerService.onStartCommand action=" + action);
 
         if (ACTION_START.equals(action)) {
-            String incomingProfile = intent.getStringExtra(EXTRA_PROFILE);
-            if (incomingProfile != null && incomingProfile.trim().length() > 0) {
-                profile = incomingProfile.trim();
+            profileId = intent.getLongExtra(EXTRA_PROFILE_ID, 1L);
+            String incomingName = intent.getStringExtra(EXTRA_PROFILE_NAME);
+            if (incomingName != null && incomingName.trim().length() > 0) {
+                profileName = incomingName.trim();
             }
             startTimer();
         } else if (ACTION_PAUSE.equals(action)) {
@@ -127,8 +125,6 @@ public class TimerService extends Service {
     }
 
     private void stopTimer() {
-        Log.d(TAG, "TimerService.stopTimer running=" + running + " paused=" + paused);
-
         if (!running) {
             stopSelf();
             return;
@@ -147,7 +143,8 @@ public class TimerService extends Service {
 
         DatabaseHelper db = new DatabaseHelper(this);
         db.addSession(
-                profile,
+                profileId,
+                profileName,
                 startTime,
                 endTime,
                 pausedSeconds,
@@ -196,7 +193,7 @@ public class TimerService extends Service {
         return builder
                 .setSmallIcon(android.R.drawable.ic_menu_recent_history)
                 .setContentTitle(title)
-                .setContentText(profile + ": " + timeText)
+                .setContentText(profileName + ": " + timeText)
                 .setContentIntent(mainIntent)
                 .setOngoing(true)
                 .addAction(
@@ -253,7 +250,7 @@ public class TimerService extends Service {
                 NotificationManager.IMPORTANCE_LOW
         );
 
-        channel.setDescription("Таймер рабочего времени");
+        channel.setDescription("Таймер учёта часов");
 
         NotificationManager manager = getSystemService(NotificationManager.class);
         manager.createNotificationChannel(channel);

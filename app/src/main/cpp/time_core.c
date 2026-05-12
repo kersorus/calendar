@@ -22,3 +22,10 @@ double tc_expected_hours(double target_hours, int days_in_period, int days_passe
 double tc_balance(double worked_hours, double expected_hours) {
     return worked_hours - expected_hours;
 }
+
+double tc_required_daily_hours(double remaining_hours, int days_left) {
+    if (remaining_hours <= 0.0 || days_left <= 0) {
+        return 0.0;
+    }
+    return remaining_hours / (double) days_left;
+}

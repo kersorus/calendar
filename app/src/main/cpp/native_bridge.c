@@ -36,3 +36,15 @@ Java_com_kersorus_timecalendar_NativeBridge_balance(
     (void) clazz;
     return tc_balance(workedHours, expectedHours);
 }
+
+JNIEXPORT jdouble JNICALL
+Java_com_kersorus_timecalendar_NativeBridge_requiredDailyHours(
+        JNIEnv *env,
+        jclass clazz,
+        jdouble remainingHours,
+        jint daysLeft
+) {
+    (void) env;
+    (void) clazz;
+    return tc_required_daily_hours(remainingHours, daysLeft);
+}

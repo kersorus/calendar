@@ -20,4 +20,9 @@ public final class NativeBridge {
             double workedHours,
             double expectedHours
     );
+
+    public static native double requiredDailyHours(
+            double remainingHours,
+            int daysLeft
+    );
 }

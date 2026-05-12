@@ -5,6 +5,7 @@ plugins {
 android {
     namespace "com.kersorus.timecalendar"
     compileSdk 35
+    ndkVersion "27.2.12479018"
 
     defaultConfig {
         applicationId "com.kersorus.timecalendar"
@@ -23,6 +24,7 @@ android {
     externalNativeBuild {
         cmake {
             path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
         }
     }
 }

@@ -1,4 +1,4 @@
-package com.kersoruss.timecalendar;
+package com.kersorus.timecalendar;
 
 import java.util.Calendar;
 

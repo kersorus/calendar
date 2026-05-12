@@ -2,7 +2,7 @@
 #include "time_core.h"
 
 JNIEXPORT jdouble JNICALL
-Java_com_kersoruss_timecalendar_NativeBridge_secondsToHours(
+Java_com_kersorus_timecalendar_NativeBridge_secondsToHours(
         JNIEnv *env,
         jclass clazz,
         jlong seconds
@@ -13,7 +13,7 @@ Java_com_kersoruss_timecalendar_NativeBridge_secondsToHours(
 }
 
 JNIEXPORT jdouble JNICALL
-Java_com_kersoruss_timecalendar_NativeBridge_expectedHours(
+Java_com_kersorus_timecalendar_NativeBridge_expectedHours(
         JNIEnv *env,
         jclass clazz,
         jdouble targetHours,
@@ -26,7 +26,7 @@ Java_com_kersoruss_timecalendar_NativeBridge_expectedHours(
 }
 
 JNIEXPORT jdouble JNICALL
-Java_com_kersoruss_timecalendar_NativeBridge_balance(
+Java_com_kersorus_timecalendar_NativeBridge_balance(
         JNIEnv *env,
         jclass clazz,
         jdouble workedHours,

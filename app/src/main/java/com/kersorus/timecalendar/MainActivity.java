@@ -1,4 +1,4 @@
-package com.kersoruss.timecalendar;
+package com.kersorus.timecalendar;
 
 import android.Manifest;
 import android.app.Activity;
@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.EditText;
@@ -20,6 +21,7 @@ import android.graphics.Typeface;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
+    private static final String TAG = "TimeCalendar";
     private static final String PREFS = "settings";
     private static final String KEY_TARGET_HOURS = "target_hours";
 
@@ -43,6 +45,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Log.d(TAG, "MainActivity.onCreate");
 
         NativeBridge.secondsToHours(0);
         db = new DatabaseHelper(this);

@@ -1,4 +1,4 @@
-package com.kersoruss.timecalendar;
+package com.kersorus.timecalendar;
 
 public final class NativeBridge {
     static {

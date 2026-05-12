@@ -1,4 +1,4 @@
-package com.kersoruss.timecalendar;
+package com.kersorus.timecalendar;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -11,14 +11,17 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.util.Log;
 
 import java.util.Locale;
 
 public class TimerService extends Service {
-    public static final String ACTION_START = "com.kersoruss.timecalendar.START";
-    public static final String ACTION_PAUSE = "com.kersoruss.timecalendar.PAUSE";
-    public static final String ACTION_RESUME = "com.kersoruss.timecalendar.RESUME";
-    public static final String ACTION_STOP = "com.kersoruss.timecalendar.STOP";
+    private static final String TAG = "TimeCalendar";
+
+    public static final String ACTION_START = "com.kersorus.timecalendar.START";
+    public static final String ACTION_PAUSE = "com.kersorus.timecalendar.PAUSE";
+    public static final String ACTION_RESUME = "com.kersorus.timecalendar.RESUME";
+    public static final String ACTION_STOP = "com.kersorus.timecalendar.STOP";
 
     public static final String EXTRA_PROFILE = "profile";
 
@@ -49,12 +52,14 @@ public class TimerService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        Log.d(TAG, "TimerService.onCreate");
         createNotificationChannel();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? ACTION_START : intent.getAction();
+        Log.d(TAG, "TimerService.onStartCommand action=" + action);
 
         if (ACTION_START.equals(action)) {
             String incomingProfile = intent.getStringExtra(EXTRA_PROFILE);
@@ -122,6 +127,8 @@ public class TimerService extends Service {
     }
 
     private void stopTimer() {
+        Log.d(TAG, "TimerService.stopTimer running=" + running + " paused=" + paused);
+
         if (!running) {
             stopSelf();
             return;

@@ -15,7 +15,7 @@ import java.util.Locale;
 
 public class DatabaseHelper extends SQLiteOpenHelper {
     private static final String DB_NAME = "time_calendar.db";
-    private static final int DB_VERSION = 2;
+    private static final int DB_VERSION = 3;
 
     public DatabaseHelper(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
@@ -25,7 +25,6 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     public void onCreate(SQLiteDatabase db) {
         createProfilesTable(db);
         createSessionsTable(db);
-        insertDefaultProfile(db);
     }
 
     @Override
@@ -38,6 +37,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             } catch (Exception ignored) {
                 createSessionsTable(db);
             }
+        }
+        if (oldVersion < 3) {
+            createProfilesTable(db);
         }
     }
 
@@ -111,12 +113,6 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             ));
         }
         cursor.close();
-
-        if (profiles.isEmpty()) {
-            SQLiteDatabase writeDb = getWritableDatabase();
-            insertDefaultProfile(writeDb);
-            return getProfiles();
-        }
 
         return profiles;
     }

@@ -39,6 +39,7 @@ public final class DateUtils {
 
     public static long monthStartSeconds(int year, int month) {
         Calendar calendar = Calendar.getInstance();
+        calendar.clear();
         calendar.set(Calendar.YEAR, year);
         calendar.set(Calendar.MONTH, month - 1);
         calendar.set(Calendar.DAY_OF_MONTH, 1);
@@ -48,6 +49,7 @@ public final class DateUtils {
 
     public static long nextMonthStartSeconds(int year, int month) {
         Calendar calendar = Calendar.getInstance();
+        calendar.clear();
         calendar.set(Calendar.YEAR, year);
         calendar.set(Calendar.MONTH, month - 1);
         calendar.set(Calendar.DAY_OF_MONTH, 1);
@@ -58,6 +60,7 @@ public final class DateUtils {
 
     public static int daysInMonth(int year, int month) {
         Calendar calendar = Calendar.getInstance();
+        calendar.clear();
         calendar.set(Calendar.YEAR, year);
         calendar.set(Calendar.MONTH, month - 1);
         calendar.set(Calendar.DAY_OF_MONTH, 1);
@@ -66,6 +69,7 @@ public final class DateUtils {
 
     public static int firstWeekdayMondayBased(int year, int month) {
         Calendar calendar = Calendar.getInstance();
+        calendar.clear();
         calendar.set(Calendar.YEAR, year);
         calendar.set(Calendar.MONTH, month - 1);
         calendar.set(Calendar.DAY_OF_MONTH, 1);
@@ -114,7 +118,9 @@ public final class DateUtils {
         if (endExclusiveSeconds <= startSeconds) {
             return 1;
         }
-        return inclusiveDays(startSeconds, endExclusiveSeconds - 1L);
+        long start = startOfDaySeconds(startSeconds);
+        long end = startOfDaySeconds(endExclusiveSeconds);
+        return Math.max(1, daysBetweenStarts(start, end));
     }
 
     public static int elapsedPeriodDaysIncludingToday(
@@ -125,34 +131,41 @@ public final class DateUtils {
         if (nowSeconds < startSeconds) {
             return 0;
         }
-        if (nowSeconds >= endExclusiveSeconds) {
-            return periodDays(startSeconds, endExclusiveSeconds);
+        int total = periodDays(startSeconds, endExclusiveSeconds);
+        long start = startOfDaySeconds(startSeconds);
+        long today = startOfDaySeconds(nowSeconds);
+        int elapsed = daysBetweenStarts(start, today) + 1;
+        if (elapsed < 0) {
+            return 0;
         }
-        return inclusiveDays(startSeconds, nowSeconds);
+        return Math.min(total, elapsed);
     }
 
-    public static int daysLeftInPeriodIncludingToday(long nowSeconds, long endExclusiveSeconds) {
+    public static int daysLeftAfterToday(long startSeconds, long nowSeconds, long endExclusiveSeconds) {
+        int total = periodDays(startSeconds, endExclusiveSeconds);
+        int elapsed = elapsedPeriodDaysIncludingToday(startSeconds, nowSeconds, endExclusiveSeconds);
+        return Math.max(0, total - elapsed);
+    }
+
+    public static int daysAvailableForWorkIncludingToday(long nowSeconds, long endExclusiveSeconds) {
         if (nowSeconds >= endExclusiveSeconds) {
             return 0;
         }
         long today = startOfDaySeconds(nowSeconds);
-        return inclusiveDays(today, endExclusiveSeconds - 1L);
+        long end = startOfDaySeconds(endExclusiveSeconds);
+        return Math.max(1, daysBetweenStarts(today, end));
     }
 
-    public static int inclusiveDays(long startSeconds, long endSeconds) {
+    private static int daysBetweenStarts(long startDaySeconds, long endDaySeconds) {
         Calendar start = Calendar.getInstance();
-        start.setTimeInMillis(startSeconds * 1000L);
+        start.setTimeInMillis(startDaySeconds * 1000L);
         moveToDayStart(start);
 
         Calendar end = Calendar.getInstance();
-        end.setTimeInMillis(endSeconds * 1000L);
+        end.setTimeInMillis(endDaySeconds * 1000L);
         moveToDayStart(end);
 
-        if (end.before(start)) {
-            return 1;
-        }
-
-        int days = 1;
+        int days = 0;
         while (start.before(end)) {
             start.add(Calendar.DAY_OF_MONTH, 1);
             days++;

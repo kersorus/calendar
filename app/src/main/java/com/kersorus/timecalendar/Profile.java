@@ -4,6 +4,7 @@ public class Profile {
     public static final String PERIOD_WEEK = "week";
     public static final String PERIOD_MONTH = "month";
     public static final String PERIOD_DEADLINE = "deadline";
+    public static final String PERIOD_NONE = "none";
 
     public long id;
     public String name;
@@ -26,6 +27,18 @@ public class Profile {
         this.periodType = periodType;
         this.deadlineSeconds = deadlineSeconds;
         this.createdAtSeconds = createdAtSeconds;
+    }
+
+    public boolean hasRegularGoal() {
+        return PERIOD_WEEK.equals(periodType) || PERIOD_MONTH.equals(periodType);
+    }
+
+    public boolean hasDeadlineGoal() {
+        return PERIOD_DEADLINE.equals(periodType);
+    }
+
+    public boolean hasAnyGoal() {
+        return !PERIOD_NONE.equals(periodType) && targetHours > 0.0;
     }
 
     @Override

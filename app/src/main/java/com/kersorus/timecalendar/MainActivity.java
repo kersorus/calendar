@@ -12,16 +12,24 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.GridLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Locale;
 
@@ -35,8 +43,9 @@ public class MainActivity extends Activity {
 
     private DatabaseHelper db;
     private ArrayList<Profile> profiles = new ArrayList<>();
-    private long selectedProfileId = 1L;
+    private long selectedProfileId = -1L;
     private boolean forecastExpanded = false;
+    private boolean firstProfileDialogShown = false;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -57,7 +66,7 @@ public class MainActivity extends Activity {
 
         requestNotificationPermissionIfNeeded();
         buildUi();
-        loadProfilesAndSelect(1L);
+        loadProfilesAndSelect(-1L);
     }
 
     @Override
@@ -115,7 +124,7 @@ public class MainActivity extends Activity {
         Button addProfileButton = new Button(this);
         addProfileButton.setText("+");
         addProfileButton.setTextSize(22);
-        addProfileButton.setOnClickListener(v -> showEmptyMenu("Создание профиля"));
+        addProfileButton.setOnClickListener(v -> showCreateProfileDialog(false));
         LinearLayout.LayoutParams addParams = new LinearLayout.LayoutParams(dp(56), dp(56));
         addParams.leftMargin = dp(10);
         profileRow.addView(addProfileButton, addParams);
@@ -208,6 +217,16 @@ public class MainActivity extends Activity {
     private void loadProfilesAndSelect(long profileIdToSelect) {
         profiles = db.getProfiles();
 
+        if (profiles.isEmpty()) {
+            selectedProfileId = -1L;
+            refreshEverything();
+            if (!firstProfileDialogShown) {
+                firstProfileDialogShown = true;
+                handler.postDelayed(() -> showCreateProfileDialog(true), 300L);
+            }
+            return;
+        }
+
         long selected = profileIdToSelect;
         boolean found = false;
         for (Profile profile : profiles) {
@@ -216,7 +235,7 @@ public class MainActivity extends Activity {
                 break;
             }
         }
-        if (!found && !profiles.isEmpty()) {
+        if (!found) {
             selected = profiles.get(0).id;
         }
 
@@ -238,7 +257,7 @@ public class MainActivity extends Activity {
 
     private void showProfileChooser() {
         if (profiles.isEmpty()) {
-            toast("Профилей пока нет");
+            showCreateProfileDialog(true);
             return;
         }
 
@@ -246,7 +265,7 @@ public class MainActivity extends Activity {
         int checked = 0;
         for (int i = 0; i < profiles.size(); i++) {
             Profile profile = profiles.get(i);
-            names[i] = profile.name + " — " + formatHours(profile.targetHours) + " ч";
+            names[i] = formatProfileLine(profile);
             if (profile.id == selectedProfileId) {
                 checked = i;
             }
@@ -259,8 +278,157 @@ public class MainActivity extends Activity {
                     refreshEverything();
                     dialog.dismiss();
                 })
+                .setPositiveButton("Новый", (dialog, which) -> showCreateProfileDialog(false))
                 .setNegativeButton("Закрыть", null)
                 .show();
+    }
+
+    private void showCreateProfileDialog(boolean firstProfile) {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(4);
+        root.setPadding(pad, pad, pad, pad);
+
+        TextView intro = new TextView(this);
+        intro.setText(firstProfile
+                ? "Создайте первый профиль, чтобы начать учёт времени."
+                : "Выберите тип профиля. Позже настройки можно будет расширить.");
+        intro.setPadding(0, 0, 0, dp(10));
+        root.addView(intro);
+
+        EditText nameInput = new EditText(this);
+        nameInput.setHint("Название, например Работа");
+        nameInput.setSingleLine(true);
+        nameInput.setText(firstProfile ? "Работа" : "");
+        root.addView(labeled("Название", nameInput));
+
+        Spinner typeSpinner = new Spinner(this);
+        String[] typeLabels = {
+                "Регулярная норма",
+                "Цель до даты",
+                "Просто учёт времени"
+        };
+        typeSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, typeLabels));
+        root.addView(labeled("Тип", typeSpinner));
+
+        Spinner periodSpinner = new Spinner(this);
+        String[] periodLabels = {"Месяц", "Неделя"};
+        periodSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, periodLabels));
+        LinearLayout periodRow = labeled("Период", periodSpinner);
+        root.addView(periodRow);
+
+        EditText targetInput = new EditText(this);
+        targetInput.setHint("Например 30");
+        targetInput.setSingleLine(true);
+        targetInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        targetInput.setText("30");
+        LinearLayout targetRow = labeled("Часов", targetInput);
+        root.addView(targetRow);
+
+        EditText deadlineInput = new EditText(this);
+        deadlineInput.setHint("ГГГГ-ММ-ДД");
+        deadlineInput.setSingleLine(true);
+        deadlineInput.setInputType(InputType.TYPE_CLASS_DATETIME);
+        deadlineInput.setText(defaultDeadlineText());
+        LinearLayout deadlineRow = labeled("Дедлайн", deadlineInput);
+        root.addView(deadlineRow);
+
+        Runnable updateVisibility = () -> {
+            int type = typeSpinner.getSelectedItemPosition();
+            boolean regular = type == 0;
+            boolean deadline = type == 1;
+            periodRow.setVisibility(regular ? View.VISIBLE : View.GONE);
+            targetRow.setVisibility((regular || deadline) ? View.VISIBLE : View.GONE);
+            deadlineRow.setVisibility(deadline ? View.VISIBLE : View.GONE);
+            if (regular && targetInput.getText().toString().trim().length() == 0) {
+                targetInput.setText("30");
+            }
+        };
+
+        typeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                updateVisibility.run();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        updateVisibility.run();
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(firstProfile ? "Первый профиль" : "Новый профиль")
+                .setView(root)
+                .setPositiveButton("Создать", null)
+                .setNegativeButton(firstProfile ? "Позже" : "Отмена", null)
+                .create();
+
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String name = nameInput.getText().toString().trim();
+            if (name.length() == 0) {
+                toast("Введите название профиля");
+                return;
+            }
+
+            int type = typeSpinner.getSelectedItemPosition();
+            String periodType;
+            double targetHours = 0.0;
+            long deadlineSeconds = 0L;
+
+            if (type == 0) {
+                periodType = periodSpinner.getSelectedItemPosition() == 1
+                        ? Profile.PERIOD_WEEK
+                        : Profile.PERIOD_MONTH;
+                targetHours = parsePositiveDouble(targetInput.getText().toString(), -1.0);
+                if (targetHours <= 0.0) {
+                    toast("Введите количество часов больше нуля");
+                    return;
+                }
+            } else if (type == 1) {
+                periodType = Profile.PERIOD_DEADLINE;
+                targetHours = parsePositiveDouble(targetInput.getText().toString(), -1.0);
+                if (targetHours <= 0.0) {
+                    toast("Введите количество часов больше нуля");
+                    return;
+                }
+                try {
+                    deadlineSeconds = DateUtils.parseDeadlineEndSeconds(deadlineInput.getText().toString().trim());
+                } catch (Exception e) {
+                    toast("Введите дедлайн в формате ГГГГ-ММ-ДД");
+                    return;
+                }
+                if (deadlineSeconds <= DateUtils.nowSeconds()) {
+                    toast("Дедлайн должен быть в будущем");
+                    return;
+                }
+            } else {
+                periodType = Profile.PERIOD_NONE;
+            }
+
+            long profileId = db.saveProfile(0L, name, targetHours, periodType, deadlineSeconds);
+            if (profileId <= 0L) {
+                toast("Не удалось сохранить профиль");
+                return;
+            }
+            dialog.dismiss();
+            loadProfilesAndSelect(profileId);
+        }));
+
+        dialog.show();
+    }
+
+    private LinearLayout labeled(String label, View input) {
+        LinearLayout wrapper = new LinearLayout(this);
+        wrapper.setOrientation(LinearLayout.VERTICAL);
+        wrapper.setPadding(0, dp(4), 0, dp(6));
+
+        TextView labelView = new TextView(this);
+        labelView.setText(label);
+        labelView.setTypeface(Typeface.DEFAULT_BOLD);
+        wrapper.addView(labelView);
+        wrapper.addView(input);
+        return wrapper;
     }
 
     private void showEmptyMenu(String title) {
@@ -274,6 +442,7 @@ public class MainActivity extends Activity {
     private void showFullLog() {
         Profile profile = currentProfile();
         if (profile == null) {
+            toast("Сначала создайте профиль");
             return;
         }
         new AlertDialog.Builder(this)
@@ -291,15 +460,17 @@ public class MainActivity extends Activity {
     private void refreshEverything() {
         Profile profile = currentProfile();
         if (profile == null) {
-            profileCardText.setText("Создайте профиль  ▾");
-            forecastMainText.setText("Нет профиля");
-            forecastDetailsText.setText("Нажмите +, чтобы позже создать профиль.");
-            sessionsText.setText("Записей пока нет.");
+            profileCardText.setText("Создайте первый профиль  +");
+            calendarTitleText.setText("\nКалендарь");
             calendarGrid.removeAllViews();
+            forecastMainText.setText("Создайте профиль, чтобы начать.  ▾");
+            forecastDetailsText.setText("Можно выбрать регулярную норму, цель до даты или простой учёт времени без нормы.");
+            forecastDetailsText.setVisibility(forecastExpanded ? View.VISIBLE : View.GONE);
+            sessionsText.setText("Записей пока нет.");
             return;
         }
 
-        profileCardText.setText(profile.name + "\n" + formatHours(profile.targetHours) + " ч · " + periodTitle(profile));
+        profileCardText.setText(profile.name + "\n" + formatProfileShort(profile));
         refreshCalendar(profile);
         refreshForecast(profile);
         sessionsText.setText(db.getLastSessionsText(profile.id, 8));
@@ -361,6 +532,12 @@ public class MainActivity extends Activity {
 
     private void refreshForecast(Profile profile) {
         long now = DateUtils.nowSeconds();
+
+        if (Profile.PERIOD_NONE.equals(profile.periodType)) {
+            refreshSimpleProfileForecast(profile);
+            return;
+        }
+
         long from;
         long toExclusive;
         String periodLabel;
@@ -386,21 +563,22 @@ public class MainActivity extends Activity {
 
         int daysInPeriod = DateUtils.periodDays(from, toExclusive);
         int daysPassed = DateUtils.elapsedPeriodDaysIncludingToday(from, now, toExclusive);
-        int daysLeft = DateUtils.daysLeftInPeriodIncludingToday(now, toExclusive);
+        int daysLeftAfterToday = DateUtils.daysLeftAfterToday(from, now, toExclusive);
+        int daysForWork = DateUtils.daysAvailableForWorkIncludingToday(now, toExclusive);
 
         double expectedHours = NativeBridge.expectedHours(profile.targetHours, daysInPeriod, daysPassed);
         double currentBalance = NativeBridge.balance(workedHours, expectedHours);
         double finalBalance = NativeBridge.balance(workedHours, profile.targetHours);
         double remainingHours = Math.max(0.0, profile.targetHours - workedHours);
-        double requiredDaily = NativeBridge.requiredDailyHours(remainingHours, daysLeft);
+        double requiredDaily = NativeBridge.requiredDailyHours(remainingHours, daysForWork);
 
         String main;
         if (remainingHours <= 0.0001) {
-            main = "Норма закрыта. Можно остановиться или делать запас.  ▾";
-        } else if (daysLeft <= 0) {
-            main = "Период закончился. Проверь итоговый баланс.  ▾";
+            main = "Цель закрыта. Запас: " + formatHours(Math.max(0.0, workedHours - profile.targetHours)) + " ч.  ▾";
+        } else if (daysForWork <= 0) {
+            main = "Период закончился. Итог: " + formatSignedHours(finalBalance) + " ч.  ▾";
         } else {
-            main = "Чтобы спокойно догнать: " + formatHours(requiredDaily) + " ч/день.  ▾";
+            main = "Чтобы спокойно успеть: " + formatHours(requiredDaily) + " ч/день.  ▾";
         }
 
         String details = String.format(
@@ -409,7 +587,8 @@ public class MainActivity extends Activity {
                         "Период: %s\n" +
                         "Норма: %s ч\n" +
                         "Прошло дней: %d из %d\n" +
-                        "Осталось дней: %d\n\n" +
+                        "Осталось дней после сегодня: %d\n" +
+                        "Дней для добора, включая сегодня: %d\n\n" +
                         "План к сегодня: %s ч\n" +
                         "Факт: %s ч\n" +
                         "Баланс сейчас: %s ч\n\n" +
@@ -421,7 +600,8 @@ public class MainActivity extends Activity {
                 formatHours(profile.targetHours),
                 daysPassed,
                 daysInPeriod,
-                daysLeft,
+                daysLeftAfterToday,
+                daysForWork,
                 formatHours(expectedHours),
                 formatHours(workedHours),
                 formatSignedHours(currentBalance),
@@ -435,6 +615,24 @@ public class MainActivity extends Activity {
         forecastDetailsText.setVisibility(forecastExpanded ? View.VISIBLE : View.GONE);
     }
 
+    private void refreshSimpleProfileForecast(Profile profile) {
+        int year = DateUtils.currentYear();
+        int month = DateUtils.currentMonth();
+        long from = DateUtils.monthStartSeconds(year, month);
+        long toExclusive = DateUtils.nextMonthStartSeconds(year, month);
+        long workedSeconds = db.getWorkedSecondsForRange(profile.id, from, toExclusive);
+        double workedHours = NativeBridge.secondsToHours(workedSeconds);
+
+        forecastMainText.setText("Без нормы: в этом месяце " + formatHours(workedHours) + " ч.  ▾");
+        forecastDetailsText.setText(
+                "Профиль: " + profile.name + "\n" +
+                        "Тип: простой учёт времени\n" +
+                        "Регулярной нормы нет. Приложение просто собирает сессии, показывает календарь и лог.\n\n" +
+                        "За текущий месяц: " + formatHours(workedHours) + " ч"
+        );
+        forecastDetailsText.setVisibility(forecastExpanded ? View.VISIBLE : View.GONE);
+    }
+
     private String periodTitle(Profile profile) {
         if (Profile.PERIOD_WEEK.equals(profile.periodType)) {
             return "неделя";
@@ -442,13 +640,27 @@ public class MainActivity extends Activity {
         if (Profile.PERIOD_DEADLINE.equals(profile.periodType)) {
             return "до " + DateUtils.formatDeadline(profile.deadlineSeconds);
         }
+        if (Profile.PERIOD_NONE.equals(profile.periodType)) {
+            return "без нормы";
+        }
         return "месяц";
+    }
+
+    private String formatProfileShort(Profile profile) {
+        if (Profile.PERIOD_NONE.equals(profile.periodType)) {
+            return "простой учёт · без нормы";
+        }
+        return formatHours(profile.targetHours) + " ч · " + periodTitle(profile);
+    }
+
+    private String formatProfileLine(Profile profile) {
+        return profile.name + " — " + formatProfileShort(profile);
     }
 
     private void startTimer() {
         Profile profile = currentProfile();
         if (profile == null) {
-            toast("Сначала создайте профиль");
+            showCreateProfileDialog(true);
             return;
         }
 
@@ -519,6 +731,23 @@ public class MainActivity extends Activity {
 
     private static String formatSignedHours(double value) {
         return String.format(Locale.getDefault(), "%+.2f", value);
+    }
+
+    private static double parsePositiveDouble(String text, double fallback) {
+        try {
+            String normalized = text.trim().replace(',', '.');
+            double value = Double.parseDouble(normalized);
+            return value > 0.0 ? value : fallback;
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    private static String defaultDeadlineText() {
+        Calendar calendar = Calendar.getInstance();
+        calendar.add(Calendar.MONTH, 1);
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+        return format.format(new Date(calendar.getTimeInMillis()));
     }
 
     private void toast(String message) {

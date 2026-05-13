@@ -3,6 +3,7 @@ package com.kersorus.timecalendar;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.DatePickerDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -36,6 +37,7 @@ import java.util.Locale;
 public class MainActivity extends Activity {
     private TextView profileCardText;
     private TextView calendarTitleText;
+    private Button calendarModeButton;
     private GridLayout calendarGrid;
     private TextView forecastMainText;
     private TextView forecastDetailsText;
@@ -46,6 +48,10 @@ public class MainActivity extends Activity {
     private long selectedProfileId = -1L;
     private boolean forecastExpanded = false;
     private boolean firstProfileDialogShown = false;
+    private boolean calendarMonthMode = true;
+    private int visibleYear = DateUtils.currentYear();
+    private int visibleMonth = DateUtils.currentMonth();
+    private long visibleWeekStartSeconds = DateUtils.weekStartSeconds();
 
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -131,6 +137,36 @@ public class MainActivity extends Activity {
 
         calendarTitleText = sectionTitle("Календарь");
         root.addView(calendarTitleText);
+
+        LinearLayout calendarControls = new LinearLayout(this);
+        calendarControls.setOrientation(LinearLayout.HORIZONTAL);
+        calendarControls.setGravity(Gravity.CENTER_VERTICAL);
+        root.addView(calendarControls);
+
+        Button prevCalendarButton = new Button(this);
+        prevCalendarButton.setText("‹");
+        prevCalendarButton.setOnClickListener(v -> moveCalendar(-1));
+        calendarControls.addView(prevCalendarButton, new LinearLayout.LayoutParams(dp(52), dp(46)));
+
+        Button todayCalendarButton = new Button(this);
+        todayCalendarButton.setText("Сегодня");
+        todayCalendarButton.setOnClickListener(v -> resetCalendarToToday());
+        LinearLayout.LayoutParams todayParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        todayParams.leftMargin = dp(6);
+        todayParams.rightMargin = dp(6);
+        calendarControls.addView(todayCalendarButton, todayParams);
+
+        calendarModeButton = new Button(this);
+        calendarModeButton.setText("Месяц");
+        calendarModeButton.setOnClickListener(v -> toggleCalendarMode());
+        calendarControls.addView(calendarModeButton, new LinearLayout.LayoutParams(0, dp(46), 1f));
+
+        Button nextCalendarButton = new Button(this);
+        nextCalendarButton.setText("›");
+        nextCalendarButton.setOnClickListener(v -> moveCalendar(1));
+        LinearLayout.LayoutParams nextParams = new LinearLayout.LayoutParams(dp(52), dp(46));
+        nextParams.leftMargin = dp(6);
+        calendarControls.addView(nextCalendarButton, nextParams);
 
         calendarGrid = new GridLayout(this);
         calendarGrid.setColumnCount(7);
@@ -333,10 +369,12 @@ public class MainActivity extends Activity {
         root.addView(targetRow);
 
         EditText deadlineInput = new EditText(this);
-        deadlineInput.setHint("ГГГГ-ММ-ДД");
+        deadlineInput.setHint("Выберите дату");
         deadlineInput.setSingleLine(true);
-        deadlineInput.setInputType(InputType.TYPE_CLASS_DATETIME);
+        deadlineInput.setFocusable(false);
+        deadlineInput.setInputType(InputType.TYPE_NULL);
         deadlineInput.setText(defaultDeadlineText());
+        deadlineInput.setOnClickListener(v -> showDatePicker(deadlineInput, true));
         LinearLayout deadlineRow = labeled("Дедлайн", deadlineInput);
         root.addView(deadlineRow);
 
@@ -423,6 +461,33 @@ public class MainActivity extends Activity {
         }));
 
         dialog.show();
+    }
+
+    private void showDatePicker(EditText targetInput, boolean deadlineEnd) {
+        long initialSeconds;
+        try {
+            String current = targetInput.getText().toString().trim();
+            initialSeconds = current.length() == 0
+                    ? DateUtils.todayStartSeconds()
+                    : DateUtils.parseDayStartSeconds(current);
+        } catch (Exception e) {
+            initialSeconds = DateUtils.todayStartSeconds();
+        }
+
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTimeInMillis(initialSeconds * 1000L);
+
+        DatePickerDialog picker = new DatePickerDialog(
+                this,
+                (view, year, month, dayOfMonth) -> {
+                    long selected = DateUtils.dayStartSeconds(year, month + 1, dayOfMonth);
+                    targetInput.setText(DateUtils.formatDate(selected));
+                },
+                calendar.get(Calendar.YEAR),
+                calendar.get(Calendar.MONTH),
+                calendar.get(Calendar.DAY_OF_MONTH)
+        );
+        picker.show();
     }
 
     private LinearLayout labeled(String label, View input) {
@@ -514,10 +579,12 @@ public class MainActivity extends Activity {
         root.setPadding(pad, pad, pad, pad);
 
         EditText dateInput = new EditText(this);
-        dateInput.setHint("ГГГГ-ММ-ДД");
+        dateInput.setHint("Выберите дату");
         dateInput.setSingleLine(true);
-        dateInput.setInputType(InputType.TYPE_CLASS_DATETIME);
+        dateInput.setFocusable(false);
+        dateInput.setInputType(InputType.TYPE_NULL);
         dateInput.setText(editing ? DateUtils.formatDate(sessionToEdit.startTime) : DateUtils.formatDate(preferredDayStartSeconds));
+        dateInput.setOnClickListener(v -> showDatePicker(dateInput, false));
         root.addView(labeled("Дата", dateInput));
 
         EditText hoursInput = new EditText(this);
@@ -632,40 +699,143 @@ public class MainActivity extends Activity {
     }
 
     private void refreshCalendar(Profile profile) {
-        int year = DateUtils.currentYear();
-        int month = DateUtils.currentMonth();
+        if (calendarModeButton != null) {
+            calendarModeButton.setText(calendarMonthMode ? "Месяц" : "Неделя");
+        }
+
+        if (calendarMonthMode) {
+            refreshMonthCalendar(profile);
+        } else {
+            refreshWeekCalendar(profile);
+        }
+    }
+
+    private void refreshMonthCalendar(Profile profile) {
+        int year = visibleYear;
+        int month = visibleMonth;
         int daysInMonth = DateUtils.daysInMonth(year, month);
         int firstWeekday = DateUtils.firstWeekdayMondayBased(year, month);
-        HashMap<Integer, Long> workedByDay = db.getWorkedSecondsByDay(profile.id, year, month);
+        HashMap<Long, Long> workedByDay = db.getWorkedSecondsByDayRange(
+                profile.id,
+                DateUtils.monthStartSeconds(year, month),
+                DateUtils.nextMonthStartSeconds(year, month)
+        );
 
         calendarTitleText.setText("\nКалендарь · " + String.format(Locale.getDefault(), "%02d.%d", month, year));
         calendarGrid.removeAllViews();
+        calendarGrid.setColumnCount(7);
 
-        String[] weekDays = {"Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"};
-        for (String dayName : weekDays) {
-            TextView cell = calendarCell(dayName, true);
-            calendarGrid.addView(cell);
-        }
+        addWeekdayHeaders();
 
         for (int i = 1; i < firstWeekday; i++) {
-            calendarGrid.addView(calendarCell("", false));
+            calendarGrid.addView(calendarCell("", true));
         }
 
         for (int day = 1; day <= daysInMonth; day++) {
-            Long seconds = workedByDay.get(day);
-            String text = String.valueOf(day);
-            if (seconds != null && seconds > 0L) {
-                text += "\n" + formatHours(NativeBridge.secondsToHours(seconds)) + " ч";
-            }
-            TextView cell = calendarCell(text, false);
-            final long dayStart = DateUtils.dayStartSeconds(year, month, day);
-            cell.setOnClickListener(v -> showDayDialog(profile, dayStart));
-            if (seconds != null && seconds > 0L) {
-                cell.setTypeface(Typeface.DEFAULT_BOLD);
-                cell.setBackground(dayWithWorkBackground());
-            }
-            calendarGrid.addView(cell);
+            long dayStart = DateUtils.dayStartSeconds(year, month, day);
+            calendarGrid.addView(calendarDayCell(profile, dayStart, day, workedByDay.get(dayStart)));
         }
+    }
+
+    private void refreshWeekCalendar(Profile profile) {
+        long from = visibleWeekStartSeconds;
+        long to = from + 7L * 24L * 60L * 60L;
+        HashMap<Long, Long> workedByDay = db.getWorkedSecondsByDayRange(profile.id, from, to);
+
+        calendarTitleText.setText("\nКалендарь · неделя " + DateUtils.formatDate(from) + " — " + DateUtils.formatDate(to - 1L));
+        calendarGrid.removeAllViews();
+        calendarGrid.setColumnCount(7);
+
+        addWeekdayHeaders();
+
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTimeInMillis(from * 1000L);
+        for (int i = 0; i < 7; i++) {
+            long dayStart = DateUtils.startOfDaySeconds(calendar.getTimeInMillis() / 1000L);
+            int dayNumber = calendar.get(Calendar.DAY_OF_MONTH);
+            calendarGrid.addView(calendarDayCell(profile, dayStart, dayNumber, workedByDay.get(dayStart)));
+            calendar.add(Calendar.DAY_OF_MONTH, 1);
+        }
+    }
+
+    private void addWeekdayHeaders() {
+        String[] weekDays = {"Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"};
+        for (String dayName : weekDays) {
+            calendarGrid.addView(calendarCell(dayName, true));
+        }
+    }
+
+    private TextView calendarDayCell(Profile profile, long dayStart, int dayNumber, Long seconds) {
+        boolean hasWork = seconds != null && seconds > 0L;
+        boolean isDeadline = profile.hasDeadlineGoal()
+                && DateUtils.startOfDaySeconds(profile.deadlineSeconds) == dayStart;
+        boolean isToday = DateUtils.todayStartSeconds() == dayStart;
+
+        String text = String.valueOf(dayNumber);
+        if (isToday) {
+            text += "\nсегодня";
+        }
+        if (hasWork) {
+            text += "\n" + formatHours(NativeBridge.secondsToHours(seconds)) + " ч";
+        }
+        if (isDeadline) {
+            text += "\n⚑ дедлайн";
+        }
+
+        TextView cell = calendarCell(text, false);
+        cell.setOnClickListener(v -> showDayDialog(profile, dayStart));
+        if (hasWork || isDeadline || isToday) {
+            cell.setTypeface(Typeface.DEFAULT_BOLD);
+        }
+        if (isDeadline) {
+            cell.setBackground(deadlineDayBackground());
+        } else if (hasWork) {
+            cell.setBackground(dayWithWorkBackground());
+        } else if (isToday) {
+            cell.setBackground(todayBackground());
+        }
+        return cell;
+    }
+
+    private void moveCalendar(int direction) {
+        if (calendarMonthMode) {
+            Calendar calendar = Calendar.getInstance();
+            calendar.clear();
+            calendar.set(Calendar.YEAR, visibleYear);
+            calendar.set(Calendar.MONTH, visibleMonth - 1);
+            calendar.set(Calendar.DAY_OF_MONTH, 1);
+            calendar.add(Calendar.MONTH, direction);
+            visibleYear = calendar.get(Calendar.YEAR);
+            visibleMonth = calendar.get(Calendar.MONTH) + 1;
+        } else {
+            visibleWeekStartSeconds += direction * 7L * 24L * 60L * 60L;
+        }
+        refreshEverything();
+    }
+
+    private void resetCalendarToToday() {
+        visibleYear = DateUtils.currentYear();
+        visibleMonth = DateUtils.currentMonth();
+        visibleWeekStartSeconds = DateUtils.weekStartSeconds();
+        refreshEverything();
+    }
+
+    private void toggleCalendarMode() {
+        calendarMonthMode = !calendarMonthMode;
+        if (calendarMonthMode) {
+            Calendar calendar = Calendar.getInstance();
+            calendar.setTimeInMillis(visibleWeekStartSeconds * 1000L);
+            visibleYear = calendar.get(Calendar.YEAR);
+            visibleMonth = calendar.get(Calendar.MONTH) + 1;
+        } else {
+            Calendar calendar = Calendar.getInstance();
+            calendar.clear();
+            calendar.set(Calendar.YEAR, visibleYear);
+            calendar.set(Calendar.MONTH, visibleMonth - 1);
+            calendar.set(Calendar.DAY_OF_MONTH, Math.min(Calendar.getInstance().get(Calendar.DAY_OF_MONTH), DateUtils.daysInMonth(visibleYear, visibleMonth)));
+            visibleWeekStartSeconds = DateUtils.weekStartSecondsFor(calendar.getTimeInMillis() / 1000L);
+        }
+        refreshEverything();
     }
 
     private TextView calendarCell(String text, boolean header) {
@@ -882,6 +1052,22 @@ public class MainActivity extends Activity {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(Color.rgb(232, 232, 232));
         drawable.setCornerRadius(dp(8));
+        return drawable;
+    }
+
+    private GradientDrawable deadlineDayBackground() {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(Color.rgb(248, 238, 222));
+        drawable.setCornerRadius(dp(8));
+        drawable.setStroke(dp(1), Color.rgb(190, 145, 80));
+        return drawable;
+    }
+
+    private GradientDrawable todayBackground() {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(Color.rgb(238, 242, 248));
+        drawable.setCornerRadius(dp(8));
+        drawable.setStroke(dp(1), Color.rgb(150, 165, 190));
         return drawable;
     }
 

@@ -96,7 +96,12 @@ public final class DateUtils {
     }
 
     public static long weekStartSeconds() {
+        return weekStartSecondsFor(nowSeconds());
+    }
+
+    public static long weekStartSecondsFor(long seconds) {
         Calendar calendar = Calendar.getInstance();
+        calendar.setTimeInMillis(seconds * 1000L);
         moveToDayStart(calendar);
         int day = calendar.get(Calendar.DAY_OF_WEEK);
         int mondayBased = day == Calendar.SUNDAY ? 7 : day - 1;

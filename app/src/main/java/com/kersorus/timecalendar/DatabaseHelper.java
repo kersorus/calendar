@@ -358,6 +358,37 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         return getWorkedSecondsForRange(profileId, dayStartSeconds, dayEndSeconds) > 0L;
     }
 
+    public HashMap<Long, Long> getWorkedSecondsByDayRange(
+            long profileId,
+            long fromSeconds,
+            long toExclusiveSeconds
+    ) {
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor cursor = db.rawQuery(
+                "SELECT start_time, worked_seconds FROM sessions " +
+                        "WHERE profile_id = ? AND start_time >= ? AND start_time < ?",
+                new String[]{
+                        String.valueOf(profileId),
+                        String.valueOf(fromSeconds),
+                        String.valueOf(toExclusiveSeconds)
+                }
+        );
+
+        HashMap<Long, Long> result = new HashMap<>();
+
+        while (cursor.moveToNext()) {
+            long start = cursor.getLong(0);
+            long workedSeconds = cursor.getLong(1);
+            long dayStart = DateUtils.startOfDaySeconds(start);
+
+            Long previous = result.get(dayStart);
+            result.put(dayStart, previous == null ? workedSeconds : previous + workedSeconds);
+        }
+
+        cursor.close();
+        return result;
+    }
+
     public HashMap<Integer, Long> getWorkedSecondsByDay(long profileId, int year, int month) {
         long from = DateUtils.monthStartSeconds(year, month);
         long to = DateUtils.nextMonthStartSeconds(year, month);

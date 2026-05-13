@@ -303,6 +303,56 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         return result;
     }
 
+
+    public ArrayList<TimeSession> getSessionsForDay(long profileId, long dayStartSeconds) {
+        long dayEndSeconds = dayStartSeconds + 24L * 60L * 60L;
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor cursor = db.rawQuery(
+                "SELECT id, profile_id, profile, start_time, end_time, paused_seconds, worked_seconds, comment " +
+                        "FROM sessions WHERE profile_id = ? AND start_time >= ? AND start_time < ? " +
+                        "ORDER BY start_time ASC",
+                new String[]{
+                        String.valueOf(profileId),
+                        String.valueOf(dayStartSeconds),
+                        String.valueOf(dayEndSeconds)
+                }
+        );
+
+        ArrayList<TimeSession> sessions = new ArrayList<>();
+        while (cursor.moveToNext()) {
+            sessions.add(readSession(cursor));
+        }
+        cursor.close();
+        return sessions;
+    }
+
+    public long getWorkedSecondsForDayExcludingSession(
+            long profileId,
+            long dayStartSeconds,
+            long excludedSessionId
+    ) {
+        long dayEndSeconds = dayStartSeconds + 24L * 60L * 60L;
+        SQLiteDatabase db = getReadableDatabase();
+
+        Cursor cursor = db.rawQuery(
+                "SELECT COALESCE(SUM(worked_seconds), 0) FROM sessions " +
+                        "WHERE profile_id = ? AND start_time >= ? AND start_time < ? AND id != ?",
+                new String[]{
+                        String.valueOf(profileId),
+                        String.valueOf(dayStartSeconds),
+                        String.valueOf(dayEndSeconds),
+                        String.valueOf(excludedSessionId)
+                }
+        );
+
+        long result = 0L;
+        if (cursor.moveToFirst()) {
+            result = cursor.getLong(0);
+        }
+        cursor.close();
+        return result;
+    }
+
     public boolean hasWorkOnDay(long profileId, long dayStartSeconds) {
         long dayEndSeconds = dayStartSeconds + 24L * 60L * 60L;
         return getWorkedSecondsForRange(profileId, dayStartSeconds, dayEndSeconds) > 0L;

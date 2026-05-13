@@ -44,6 +44,17 @@ public final class DateUtils {
         return calendar.getTimeInMillis() / 1000L;
     }
 
+
+    public static long dayStartSeconds(int year, int month, int day) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.clear();
+        calendar.set(Calendar.YEAR, year);
+        calendar.set(Calendar.MONTH, month - 1);
+        calendar.set(Calendar.DAY_OF_MONTH, day);
+        moveToDayStart(calendar);
+        return calendar.getTimeInMillis() / 1000L;
+    }
+
     public static long monthStartSeconds(int year, int month) {
         Calendar calendar = Calendar.getInstance();
         calendar.clear();

@@ -172,7 +172,7 @@ public class MainActivity extends Activity {
 
         Button manualButton = new Button(this);
         manualButton.setText("+ запись вручную");
-        manualButton.setOnClickListener(v -> showManualEntryDialog(null));
+        manualButton.setOnClickListener(v -> showManualEntryDialog(null, DateUtils.todayStartSeconds()));
         LinearLayout.LayoutParams manualParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(50));
         manualParams.topMargin = dp(8);
         root.addView(manualButton, manualParams);
@@ -465,12 +465,45 @@ public class MainActivity extends Activity {
 
         new AlertDialog.Builder(this)
                 .setTitle("Полный лог: " + profile.name)
-                .setItems(items, (dialog, which) -> showManualEntryDialog(sessions.get(which)))
+                .setItems(items, (dialog, which) -> showManualEntryDialog(sessions.get(which), DateUtils.startOfDaySeconds(sessions.get(which).startTime)))
                 .setPositiveButton("Закрыть", null)
                 .show();
     }
 
-    private void showManualEntryDialog(TimeSession sessionToEdit) {
+    private void showDayDialog(Profile profile, long dayStartSeconds) {
+        ArrayList<TimeSession> sessions = db.getSessionsForDay(profile.id, dayStartSeconds);
+        long totalSeconds = 0L;
+        for (TimeSession session : sessions) {
+            totalSeconds += session.workedSeconds;
+        }
+
+        String title = DateUtils.formatDate(dayStartSeconds) + " · " + profile.name;
+        String message = "Итого за день: " + formatHours(NativeBridge.secondsToHours(totalSeconds)) + " ч";
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setPositiveButton("Добавить", (dialog, which) -> showManualEntryDialog(null, dayStartSeconds))
+                .setNegativeButton("Закрыть", null);
+
+        if (sessions.isEmpty()) {
+            builder.setMessage(message + "
+
+Записей нет. Нажмите «Добавить», чтобы внести время на эту дату.");
+        } else {
+            String[] items = new String[sessions.size()];
+            for (int i = 0; i < sessions.size(); i++) {
+                items[i] = shortSessionLine(sessions.get(i));
+            }
+            builder.setMessage(message + "
+
+Нажмите на запись, чтобы отредактировать.");
+            builder.setItems(items, (dialog, which) -> showManualEntryDialog(sessions.get(which), dayStartSeconds));
+        }
+
+        builder.show();
+    }
+
+    private void showManualEntryDialog(TimeSession sessionToEdit, long preferredDayStartSeconds) {
         Profile profile = currentProfile();
         if (profile == null) {
             showCreateProfileDialog(true);
@@ -488,7 +521,7 @@ public class MainActivity extends Activity {
         dateInput.setHint("ГГГГ-ММ-ДД");
         dateInput.setSingleLine(true);
         dateInput.setInputType(InputType.TYPE_CLASS_DATETIME);
-        dateInput.setText(editing ? DateUtils.formatDate(sessionToEdit.startTime) : DateUtils.formatDate(DateUtils.nowSeconds()));
+        dateInput.setText(editing ? DateUtils.formatDate(sessionToEdit.startTime) : DateUtils.formatDate(preferredDayStartSeconds));
         root.addView(labeled("Дата", dateInput));
 
         EditText hoursInput = new EditText(this);
@@ -528,8 +561,24 @@ public class MainActivity extends Activity {
                     toast("Введите количество часов больше нуля");
                     return;
                 }
+                if (hours > 24.0) {
+                    toast("В одной дате не может быть больше 24 часов");
+                    return;
+                }
 
                 long workedSeconds = Math.round(hours * 3600.0);
+                long excludedSessionId = editing ? sessionToEdit.id : -1L;
+                long alreadyOnDay = db.getWorkedSecondsForDayExcludingSession(
+                        profile.id,
+                        dayStart,
+                        excludedSessionId
+                );
+                if (alreadyOnDay + workedSeconds > 24L * 3600L) {
+                    double availableHours = NativeBridge.secondsToHours(24L * 3600L - alreadyOnDay);
+                    toast("На эту дату доступно максимум " + formatHours(Math.max(0.0, availableHours)) + " ч");
+                    return;
+                }
+
                 long startTime = dayStart + 12L * 3600L;
                 long endTime = startTime + workedSeconds;
                 String comment = commentInput.getText().toString().trim();
@@ -613,6 +662,8 @@ public class MainActivity extends Activity {
                 text += "\n" + formatHours(NativeBridge.secondsToHours(seconds)) + " ч";
             }
             TextView cell = calendarCell(text, false);
+            final long dayStart = DateUtils.dayStartSeconds(year, month, day);
+            cell.setOnClickListener(v -> showDayDialog(profile, dayStart));
             if (seconds != null && seconds > 0L) {
                 cell.setTypeface(Typeface.DEFAULT_BOLD);
                 cell.setBackground(dayWithWorkBackground());

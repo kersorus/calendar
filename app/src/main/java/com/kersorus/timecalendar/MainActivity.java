@@ -113,11 +113,11 @@ public class MainActivity extends Activity {
         title.setTypeface(Typeface.DEFAULT_BOLD);
         topRow.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        Button settingsButton = new Button(this);
-        settingsButton.setText("⚙");
-        settingsButton.setTextSize(20);
-        settingsButton.setOnClickListener(v -> showEmptyMenu("Настройки"));
-        topRow.addView(settingsButton, new LinearLayout.LayoutParams(dp(56), dp(48)));
+        Button menuButton = new Button(this);
+        menuButton.setText("☰");
+        menuButton.setTextSize(22);
+        menuButton.setOnClickListener(v -> showMainMenu());
+        topRow.addView(menuButton, new LinearLayout.LayoutParams(dp(56), dp(48)));
 
         LinearLayout profileRow = new LinearLayout(this);
         profileRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -152,15 +152,22 @@ public class MainActivity extends Activity {
         Button prevCalendarButton = new Button(this);
         prevCalendarButton.setText("‹");
         prevCalendarButton.setOnClickListener(v -> moveCalendar(-1));
-        calendarControls.addView(prevCalendarButton, new LinearLayout.LayoutParams(dp(52), dp(46)));
+        calendarControls.addView(prevCalendarButton, new LinearLayout.LayoutParams(dp(44), dp(46)));
 
         Button todayCalendarButton = new Button(this);
         todayCalendarButton.setText("Сегодня");
         todayCalendarButton.setOnClickListener(v -> resetCalendarToToday());
         LinearLayout.LayoutParams todayParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        todayParams.leftMargin = dp(6);
-        todayParams.rightMargin = dp(6);
+        todayParams.leftMargin = dp(4);
+        todayParams.rightMargin = dp(4);
         calendarControls.addView(todayCalendarButton, todayParams);
+
+        Button jumpCalendarButton = new Button(this);
+        jumpCalendarButton.setText("Дата");
+        jumpCalendarButton.setOnClickListener(v -> showCalendarJumpDialog());
+        LinearLayout.LayoutParams jumpParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        jumpParams.rightMargin = dp(4);
+        calendarControls.addView(jumpCalendarButton, jumpParams);
 
         calendarModeButton = new Button(this);
         calendarModeButton.setText("Месяц");
@@ -170,15 +177,18 @@ public class MainActivity extends Activity {
         Button nextCalendarButton = new Button(this);
         nextCalendarButton.setText("›");
         nextCalendarButton.setOnClickListener(v -> moveCalendar(1));
-        LinearLayout.LayoutParams nextParams = new LinearLayout.LayoutParams(dp(52), dp(46));
-        nextParams.leftMargin = dp(6);
+        LinearLayout.LayoutParams nextParams = new LinearLayout.LayoutParams(dp(44), dp(46));
+        nextParams.leftMargin = dp(4);
         calendarControls.addView(nextCalendarButton, nextParams);
 
         calendarGrid = new GridLayout(this);
         calendarGrid.setColumnCount(7);
-        calendarGrid.setPadding(0, dp(4), 0, dp(10));
+        calendarGrid.setPadding(dp(2), dp(6), dp(2), dp(10));
+        calendarGrid.setMinHeight(dp(300));
+        calendarGrid.setBackground(calendarAreaBackground());
+        calendarGrid.setClickable(true);
         calendarGrid.setOnTouchListener(this::handleCalendarSwipeTouch);
-        root.addView(calendarGrid);
+        root.addView(calendarGrid, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         TextView timerTitle = sectionTitle("Таймер");
         root.addView(timerTitle);
@@ -189,29 +199,33 @@ public class MainActivity extends Activity {
         root.addView(timerRow);
 
         Button startButton = new Button(this);
-        startButton.setText("Старт");
+        startButton.setText("▶");
+        startButton.setTextSize(22);
         startButton.setOnClickListener(v -> startTimer());
-        timerRow.addView(startButton, new LinearLayout.LayoutParams(0, dp(54), 1f));
+        timerRow.addView(startButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
 
         Button pauseButton = new Button(this);
-        pauseButton.setText("Пауза");
+        pauseButton.setText("⏸");
+        pauseButton.setTextSize(22);
         pauseButton.setOnClickListener(v -> sendServiceAction(TimerService.ACTION_PAUSE));
-        LinearLayout.LayoutParams middleButtonParams = new LinearLayout.LayoutParams(0, dp(54), 1f);
+        LinearLayout.LayoutParams middleButtonParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
         middleButtonParams.leftMargin = dp(6);
         middleButtonParams.rightMargin = dp(6);
         timerRow.addView(pauseButton, middleButtonParams);
 
         Button resumeButton = new Button(this);
-        resumeButton.setText("Дальше");
+        resumeButton.setText("▶");
+        resumeButton.setTextSize(22);
         resumeButton.setOnClickListener(v -> sendServiceAction(TimerService.ACTION_RESUME));
-        timerRow.addView(resumeButton, new LinearLayout.LayoutParams(0, dp(54), 1f));
+        timerRow.addView(resumeButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
 
         Button stopButton = new Button(this);
-        stopButton.setText("Стоп");
+        stopButton.setText("■");
+        stopButton.setTextSize(22);
         stopButton.setOnClickListener(v -> sendServiceAction(TimerService.ACTION_STOP));
-        LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(54));
-        stopParams.topMargin = dp(8);
-        root.addView(stopButton, stopParams);
+        LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        stopParams.leftMargin = dp(6);
+        timerRow.addView(stopButton, stopParams);
 
 
         TextView forecastTitle = sectionTitle("Главный ответ");
@@ -236,15 +250,6 @@ public class MainActivity extends Activity {
         forecastDetailsText.setVisibility(View.GONE);
         forecastCard.addView(forecastDetailsText);
 
-        TextView sessionsTitle = sectionTitle("Последние записи");
-        root.addView(sessionsTitle);
-
-        sessionsText = new TextView(this);
-        sessionsText.setTextSize(15);
-        sessionsText.setPadding(dp(16), dp(12), dp(16), dp(12));
-        sessionsText.setBackground(cardBackground());
-        sessionsText.setOnClickListener(v -> showFullLog());
-        root.addView(sessionsText);
 
         setContentView(scrollView);
     }
@@ -323,11 +328,28 @@ public class MainActivity extends Activity {
                     dialog.dismiss();
                 })
                 .setPositiveButton("Новый", (dialog, which) -> showCreateProfileDialog(false))
+                .setNeutralButton("Редактировать", (dialog, which) -> showEditCurrentProfileDialog())
                 .setNegativeButton("Закрыть", null)
                 .show();
     }
 
+
     private void showCreateProfileDialog(boolean firstProfile) {
+        showProfileEditorDialog(null, firstProfile);
+    }
+
+    private void showEditCurrentProfileDialog() {
+        Profile profile = currentProfile();
+        if (profile == null) {
+            showCreateProfileDialog(true);
+            return;
+        }
+        showProfileEditorDialog(profile, false);
+    }
+
+    private void showProfileEditorDialog(Profile profileToEdit, boolean firstProfile) {
+        boolean editing = profileToEdit != null;
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         int pad = dp(4);
@@ -336,14 +358,14 @@ public class MainActivity extends Activity {
         TextView intro = new TextView(this);
         intro.setText(firstProfile
                 ? "Создайте первый профиль, чтобы начать учёт времени."
-                : "Выберите тип профиля. Позже настройки можно будет расширить.");
+                : editing ? "Измените параметры профиля." : "Выберите тип профиля.");
         intro.setPadding(0, 0, 0, dp(10));
         root.addView(intro);
 
         EditText nameInput = new EditText(this);
         nameInput.setHint("Название, например Работа");
         nameInput.setSingleLine(true);
-        nameInput.setText(firstProfile ? "Работа" : "");
+        nameInput.setText(editing ? profileToEdit.name : (firstProfile ? "Работа" : ""));
         root.addView(labeled("Название", nameInput));
 
         Spinner typeSpinner = new Spinner(this);
@@ -365,13 +387,14 @@ public class MainActivity extends Activity {
         targetInput.setHint("Например 30");
         targetInput.setSingleLine(true);
         targetInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        targetInput.setText("30");
+        targetInput.setText(editing ? formatHours(profileToEdit.targetHours) : "30");
         LinearLayout targetRow = labeled("Часов", targetInput);
         root.addView(targetRow);
 
         CheckBox workScheduleCheck = new CheckBox(this);
         workScheduleCheck.setText("Рабочий график: понедельник–пятница по 8 часов");
         workScheduleCheck.setPadding(0, dp(6), 0, dp(6));
+        workScheduleCheck.setChecked(editing && profileToEdit.useWorkSchedule);
         root.addView(workScheduleCheck);
 
         EditText deadlineInput = new EditText(this);
@@ -379,10 +402,23 @@ public class MainActivity extends Activity {
         deadlineInput.setSingleLine(true);
         deadlineInput.setFocusable(false);
         deadlineInput.setInputType(InputType.TYPE_NULL);
-        deadlineInput.setText(defaultDeadlineText());
+        deadlineInput.setText(editing && profileToEdit.deadlineSeconds > 0L
+                ? DateUtils.formatDate(profileToEdit.deadlineSeconds)
+                : defaultDeadlineText());
         deadlineInput.setOnClickListener(v -> showDatePicker(deadlineInput, true));
         LinearLayout deadlineRow = labeled("Дедлайн", deadlineInput);
         root.addView(deadlineRow);
+
+        if (editing) {
+            if (Profile.PERIOD_DEADLINE.equals(profileToEdit.periodType)) {
+                typeSpinner.setSelection(1);
+            } else if (Profile.PERIOD_NONE.equals(profileToEdit.periodType)) {
+                typeSpinner.setSelection(2);
+            } else {
+                typeSpinner.setSelection(0);
+            }
+            periodSpinner.setSelection(Profile.PERIOD_WEEK.equals(profileToEdit.periodType) ? 1 : 0);
+        }
 
         Runnable updateVisibility = () -> {
             int type = typeSpinner.getSelectedItemPosition();
@@ -411,9 +447,9 @@ public class MainActivity extends Activity {
         updateVisibility.run();
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(firstProfile ? "Первый профиль" : "Новый профиль")
+                .setTitle(editing ? "Редактировать профиль" : firstProfile ? "Первый профиль" : "Новый профиль")
                 .setView(root)
-                .setPositiveButton("Создать", null)
+                .setPositiveButton(editing ? "Сохранить" : "Создать", null)
                 .setNegativeButton(firstProfile ? "Позже" : "Отмена", null)
                 .create();
 
@@ -428,22 +464,20 @@ public class MainActivity extends Activity {
             String periodType;
             double targetHours = 0.0;
             long deadlineSeconds = 0L;
-
             boolean useWorkSchedule = false;
             int workDaysMask = Profile.WORK_DAYS_MON_FRI;
             double workHoursPerDay = 8.0;
 
             if (type == 0) {
-                periodType = periodSpinner.getSelectedItemPosition() == 1
-                        ? Profile.PERIOD_WEEK
-                        : Profile.PERIOD_MONTH;
+                periodType = periodSpinner.getSelectedItemPosition() == 1 ? Profile.PERIOD_WEEK : Profile.PERIOD_MONTH;
                 useWorkSchedule = workScheduleCheck.isChecked();
                 if (useWorkSchedule) {
                     targetHours = 0.0;
+                    workHoursPerDay = 8.0;
                 } else {
                     targetHours = parsePositiveDouble(targetInput.getText().toString(), -1.0);
                     if (targetHours <= 0.0) {
-                        toast("Введите количество часов больше нуля");
+                        toast("Введите норму часов");
                         return;
                     }
                 }
@@ -451,13 +485,13 @@ public class MainActivity extends Activity {
                 periodType = Profile.PERIOD_DEADLINE;
                 targetHours = parsePositiveDouble(targetInput.getText().toString(), -1.0);
                 if (targetHours <= 0.0) {
-                    toast("Введите количество часов больше нуля");
+                    toast("Введите количество часов до дедлайна");
                     return;
                 }
                 try {
                     deadlineSeconds = DateUtils.parseDeadlineEndSeconds(deadlineInput.getText().toString().trim());
                 } catch (Exception e) {
-                    toast("Введите дедлайн в формате ГГГГ-ММ-ДД");
+                    toast("Выберите дату дедлайна");
                     return;
                 }
                 if (deadlineSeconds <= DateUtils.nowSeconds()) {
@@ -469,7 +503,7 @@ public class MainActivity extends Activity {
             }
 
             long profileId = db.saveProfile(
-                    0L,
+                    editing ? profileToEdit.id : 0L,
                     name,
                     targetHours,
                     periodType,
@@ -527,6 +561,51 @@ public class MainActivity extends Activity {
         wrapper.addView(labelView);
         wrapper.addView(input);
         return wrapper;
+    }
+
+
+    private void showMainMenu() {
+        String[] items = {"Лог", "Редактировать профиль", "Настройки"};
+        new AlertDialog.Builder(this)
+                .setTitle("Меню")
+                .setItems(items, (dialog, which) -> {
+                    if (which == 0) {
+                        showFullLog();
+                    } else if (which == 1) {
+                        showEditCurrentProfileDialog();
+                    } else {
+                        showEmptyMenu("Настройки");
+                    }
+                })
+                .setNegativeButton("Закрыть", null)
+                .show();
+    }
+
+    private void showCalendarJumpDialog() {
+        long initialSeconds;
+        if (calendarMonthMode) {
+            initialSeconds = DateUtils.monthStartSeconds(visibleYear, visibleMonth);
+        } else {
+            initialSeconds = visibleWeekStartSeconds;
+        }
+
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTimeInMillis(initialSeconds * 1000L);
+
+        DatePickerDialog picker = new DatePickerDialog(
+                this,
+                (view, year, month, dayOfMonth) -> {
+                    long selected = DateUtils.dayStartSeconds(year, month + 1, dayOfMonth);
+                    visibleYear = year;
+                    visibleMonth = month + 1;
+                    visibleWeekStartSeconds = DateUtils.weekStartSecondsFor(selected);
+                    refreshEverything();
+                },
+                calendar.get(Calendar.YEAR),
+                calendar.get(Calendar.MONTH),
+                calendar.get(Calendar.DAY_OF_MONTH)
+        );
+        picker.show();
     }
 
     private void showEmptyMenu(String title) {
@@ -714,14 +793,18 @@ public class MainActivity extends Activity {
             forecastMainText.setText("Создайте профиль, чтобы начать.  ▾");
             forecastDetailsText.setText("Можно выбрать регулярную норму, цель до даты или простой учёт времени без нормы.");
             forecastDetailsText.setVisibility(forecastExpanded ? View.VISIBLE : View.GONE);
-            sessionsText.setText("Записей пока нет.");
+            if (sessionsText != null) {
+                sessionsText.setText("Записей пока нет.");
+            }
             return;
         }
 
         profileCardText.setText(profile.name + "\n" + formatProfileShort(profile));
         refreshCalendar(profile);
         refreshForecast(profile);
-        sessionsText.setText(db.getLastSessionsText(profile.id, 8));
+        if (sessionsText != null) {
+            sessionsText.setText(db.getLastSessionsText(profile.id, 8));
+        }
     }
 
     private void refreshCalendar(Profile profile) {
@@ -754,7 +837,7 @@ public class MainActivity extends Activity {
         addWeekdayHeaders();
 
         for (int i = 1; i < firstWeekday; i++) {
-            calendarGrid.addView(calendarCell("", true));
+            calendarGrid.addView(calendarEmptyCell());
         }
 
         for (int day = 1; day <= daysInMonth; day++) {
@@ -789,6 +872,14 @@ public class MainActivity extends Activity {
         for (String dayName : weekDays) {
             calendarGrid.addView(calendarCell(dayName, true));
         }
+    }
+
+
+    private TextView calendarEmptyCell() {
+        TextView cell = calendarCell("", false);
+        cell.setBackground(emptyDayBackground());
+        cell.setOnTouchListener(this::handleCalendarSwipeTouch);
+        return cell;
     }
 
     private TextView calendarDayCell(Profile profile, long dayStart, int dayNumber, Long seconds) {
@@ -826,6 +917,8 @@ public class MainActivity extends Activity {
             cell.setBackground(dayWithWorkBackground());
         } else if (isToday) {
             cell.setBackground(todayBackground());
+        } else {
+            cell.setBackground(emptyDayBackground());
         }
         return cell;
     }
@@ -836,7 +929,7 @@ public class MainActivity extends Activity {
                 calendarTouchStartX = event.getRawX();
                 calendarTouchStartY = event.getRawY();
                 calendarTouchStartTime = System.currentTimeMillis();
-                return false;
+                return view == calendarGrid;
             case MotionEvent.ACTION_UP:
                 float deltaX = event.getRawX() - calendarTouchStartX;
                 float deltaY = event.getRawY() - calendarTouchStartY;
@@ -849,7 +942,7 @@ public class MainActivity extends Activity {
                     moveCalendar(deltaX < 0 ? 1 : -1);
                     return true;
                 }
-                return false;
+                return view == calendarGrid;
             default:
                 return false;
         }
@@ -901,13 +994,13 @@ public class MainActivity extends Activity {
         cell.setText(text);
         cell.setTextSize(header ? 13 : 12);
         cell.setGravity(Gravity.CENTER);
-        cell.setMinHeight(dp(46));
+        cell.setMinHeight(dp(52));
         cell.setTextColor(Color.rgb(70, 70, 70));
         cell.setPadding(dp(2), dp(4), dp(2), dp(4));
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();
         params.width = getResources().getDisplayMetrics().widthPixels / 7 - dp(7);
         params.height = GridLayout.LayoutParams.WRAP_CONTENT;
-        params.setMargins(dp(2), dp(2), dp(2), dp(2));
+        params.setMargins(dp(2), dp(3), dp(2), dp(3));
         cell.setLayoutParams(params);
         if (header) {
             cell.setTypeface(Typeface.DEFAULT_BOLD);
@@ -979,7 +1072,7 @@ public class MainActivity extends Activity {
 
         String main;
         if (remainingHours <= 0.0001) {
-            main = "Цель закрыта. Запас: " + formatHours(Math.max(0.0, workedHours - profile.targetHours)) + " ч.  ▾";
+            main = "Цель закрыта. Запас: " + formatHours(Math.max(0.0, workedHours - targetHours)) + " ч.  ▾";
         } else if (daysForWork <= 0) {
             main = "Период закончился. Итог: " + formatSignedHours(finalBalance) + " ч.  ▾";
         } else {
@@ -1119,6 +1212,23 @@ public class MainActivity extends Activity {
                 != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 100);
         }
+    }
+
+
+    private GradientDrawable calendarAreaBackground() {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(Color.rgb(250, 250, 250));
+        drawable.setCornerRadius(dp(14));
+        drawable.setStroke(dp(1), Color.rgb(230, 230, 230));
+        return drawable;
+    }
+
+    private GradientDrawable emptyDayBackground() {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(Color.rgb(255, 255, 255));
+        drawable.setCornerRadius(dp(8));
+        drawable.setStroke(dp(1), Color.rgb(235, 235, 235));
+        return drawable;
     }
 
     private GradientDrawable cardBackground() {

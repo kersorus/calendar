@@ -8,6 +8,8 @@ import android.database.sqlite.SQLiteOpenHelper;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.HashMap;
 import java.util.Date;
 import java.util.Locale;
 
@@ -216,6 +218,39 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         }
         cursor.close();
 
+        return result;
+    }
+
+
+    public HashMap<Integer, Long> getWorkedSecondsByDay(long profileId, int year, int month) {
+        long from = DateUtils.monthStartSeconds(year, month);
+        long to = DateUtils.nextMonthStartSeconds(year, month);
+
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor cursor = db.rawQuery(
+                "SELECT start_time, worked_seconds FROM sessions " +
+                        "WHERE profile_id = ? AND start_time >= ? AND start_time < ?",
+                new String[]{
+                        String.valueOf(profileId),
+                        String.valueOf(from),
+                        String.valueOf(to)
+                }
+        );
+
+        HashMap<Integer, Long> result = new HashMap<>();
+        Calendar calendar = Calendar.getInstance();
+
+        while (cursor.moveToNext()) {
+            long start = cursor.getLong(0);
+            long workedSeconds = cursor.getLong(1);
+            calendar.setTimeInMillis(start * 1000L);
+            int day = calendar.get(Calendar.DAY_OF_MONTH);
+
+            Long previous = result.get(day);
+            result.put(day, previous == null ? workedSeconds : previous + workedSeconds);
+        }
+
+        cursor.close();
         return result;
     }
 

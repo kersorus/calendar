@@ -7,8 +7,6 @@ import java.util.Date;
 import java.util.Locale;
 
 public final class DateUtils {
-    private static final long DAY_SECONDS = 24L * 60L * 60L;
-
     private DateUtils() {
     }
 
@@ -22,26 +20,20 @@ public final class DateUtils {
         return calendar.get(Calendar.MONTH) + 1;
     }
 
-    public static int currentDayOfMonth() {
-        Calendar calendar = Calendar.getInstance();
-        return calendar.get(Calendar.DAY_OF_MONTH);
-    }
-
-    public static int daysInCurrentMonth() {
-        Calendar calendar = Calendar.getInstance();
-        return calendar.getActualMaximum(Calendar.DAY_OF_MONTH);
-    }
-
     public static long nowSeconds() {
         return System.currentTimeMillis() / 1000L;
     }
 
     public static long todayStartSeconds() {
         Calendar calendar = Calendar.getInstance();
-        calendar.set(Calendar.HOUR_OF_DAY, 0);
-        calendar.set(Calendar.MINUTE, 0);
-        calendar.set(Calendar.SECOND, 0);
-        calendar.set(Calendar.MILLISECOND, 0);
+        moveToDayStart(calendar);
+        return calendar.getTimeInMillis() / 1000L;
+    }
+
+    public static long startOfDaySeconds(long seconds) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTimeInMillis(seconds * 1000L);
+        moveToDayStart(calendar);
         return calendar.getTimeInMillis() / 1000L;
     }
 
@@ -50,10 +42,7 @@ public final class DateUtils {
         calendar.set(Calendar.YEAR, year);
         calendar.set(Calendar.MONTH, month - 1);
         calendar.set(Calendar.DAY_OF_MONTH, 1);
-        calendar.set(Calendar.HOUR_OF_DAY, 0);
-        calendar.set(Calendar.MINUTE, 0);
-        calendar.set(Calendar.SECOND, 0);
-        calendar.set(Calendar.MILLISECOND, 0);
+        moveToDayStart(calendar);
         return calendar.getTimeInMillis() / 1000L;
     }
 
@@ -62,33 +51,40 @@ public final class DateUtils {
         calendar.set(Calendar.YEAR, year);
         calendar.set(Calendar.MONTH, month - 1);
         calendar.set(Calendar.DAY_OF_MONTH, 1);
-        calendar.set(Calendar.HOUR_OF_DAY, 0);
-        calendar.set(Calendar.MINUTE, 0);
-        calendar.set(Calendar.SECOND, 0);
-        calendar.set(Calendar.MILLISECOND, 0);
+        moveToDayStart(calendar);
         calendar.add(Calendar.MONTH, 1);
         return calendar.getTimeInMillis() / 1000L;
     }
 
+    public static int daysInMonth(int year, int month) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.set(Calendar.YEAR, year);
+        calendar.set(Calendar.MONTH, month - 1);
+        calendar.set(Calendar.DAY_OF_MONTH, 1);
+        return calendar.getActualMaximum(Calendar.DAY_OF_MONTH);
+    }
+
+    public static int firstWeekdayMondayBased(int year, int month) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.set(Calendar.YEAR, year);
+        calendar.set(Calendar.MONTH, month - 1);
+        calendar.set(Calendar.DAY_OF_MONTH, 1);
+        int day = calendar.get(Calendar.DAY_OF_WEEK); // Sunday = 1
+        return day == Calendar.SUNDAY ? 7 : day - 1; // Monday = 1
+    }
+
     public static long weekStartSeconds() {
         Calendar calendar = Calendar.getInstance();
-        calendar.setFirstDayOfWeek(Calendar.MONDAY);
-        calendar.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY);
-        calendar.set(Calendar.HOUR_OF_DAY, 0);
-        calendar.set(Calendar.MINUTE, 0);
-        calendar.set(Calendar.SECOND, 0);
-        calendar.set(Calendar.MILLISECOND, 0);
+        moveToDayStart(calendar);
+        int day = calendar.get(Calendar.DAY_OF_WEEK);
+        int mondayBased = day == Calendar.SUNDAY ? 7 : day - 1;
+        calendar.add(Calendar.DAY_OF_MONTH, -(mondayBased - 1));
         return calendar.getTimeInMillis() / 1000L;
     }
 
     public static long nextWeekStartSeconds() {
         Calendar calendar = Calendar.getInstance();
-        calendar.setFirstDayOfWeek(Calendar.MONDAY);
-        calendar.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY);
-        calendar.set(Calendar.HOUR_OF_DAY, 0);
-        calendar.set(Calendar.MINUTE, 0);
-        calendar.set(Calendar.SECOND, 0);
-        calendar.set(Calendar.MILLISECOND, 0);
+        calendar.setTimeInMillis(weekStartSeconds() * 1000L);
         calendar.add(Calendar.DAY_OF_MONTH, 7);
         return calendar.getTimeInMillis() / 1000L;
     }
@@ -114,34 +110,63 @@ public final class DateUtils {
         return format.format(new Date(deadlineSeconds * 1000L));
     }
 
-    public static int inclusiveDays(long startSeconds, long endSeconds) {
-        if (endSeconds <= startSeconds) {
+    public static int periodDays(long startSeconds, long endExclusiveSeconds) {
+        if (endExclusiveSeconds <= startSeconds) {
             return 1;
         }
-        long startDay = startSeconds / DAY_SECONDS;
-        long endDay = endSeconds / DAY_SECONDS;
-        long days = endDay - startDay + 1L;
-        if (days < 1L) {
-            return 1;
-        }
-        if (days > Integer.MAX_VALUE) {
-            return Integer.MAX_VALUE;
-        }
-        return (int) days;
+        return inclusiveDays(startSeconds, endExclusiveSeconds - 1L);
     }
 
-    public static int elapsedDaysInclusive(long startSeconds, long nowSeconds, long endSeconds) {
+    public static int elapsedPeriodDaysIncludingToday(
+            long startSeconds,
+            long nowSeconds,
+            long endExclusiveSeconds
+    ) {
         if (nowSeconds < startSeconds) {
             return 0;
         }
-        long limitedNow = Math.min(nowSeconds, endSeconds);
-        return inclusiveDays(startSeconds, limitedNow);
+        if (nowSeconds >= endExclusiveSeconds) {
+            return periodDays(startSeconds, endExclusiveSeconds);
+        }
+        return inclusiveDays(startSeconds, nowSeconds);
     }
 
-    public static int daysLeftIncludingToday(long nowSeconds, long endSeconds) {
-        if (nowSeconds > endSeconds) {
+    public static int daysLeftInPeriodIncludingToday(long nowSeconds, long endExclusiveSeconds) {
+        if (nowSeconds >= endExclusiveSeconds) {
             return 0;
         }
-        return inclusiveDays(todayStartSeconds(), endSeconds);
+        long today = startOfDaySeconds(nowSeconds);
+        return inclusiveDays(today, endExclusiveSeconds - 1L);
+    }
+
+    public static int inclusiveDays(long startSeconds, long endSeconds) {
+        Calendar start = Calendar.getInstance();
+        start.setTimeInMillis(startSeconds * 1000L);
+        moveToDayStart(start);
+
+        Calendar end = Calendar.getInstance();
+        end.setTimeInMillis(endSeconds * 1000L);
+        moveToDayStart(end);
+
+        if (end.before(start)) {
+            return 1;
+        }
+
+        int days = 1;
+        while (start.before(end)) {
+            start.add(Calendar.DAY_OF_MONTH, 1);
+            days++;
+            if (days > 50000) {
+                return days;
+            }
+        }
+        return days;
+    }
+
+    private static void moveToDayStart(Calendar calendar) {
+        calendar.set(Calendar.HOUR_OF_DAY, 0);
+        calendar.set(Calendar.MINUTE, 0);
+        calendar.set(Calendar.SECOND, 0);
+        calendar.set(Calendar.MILLISECOND, 0);
     }
 }

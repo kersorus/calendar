@@ -184,7 +184,7 @@ public class MainActivity extends Activity {
         calendarGrid = new GridLayout(this);
         calendarGrid.setColumnCount(7);
         calendarGrid.setPadding(dp(2), dp(6), dp(2), dp(10));
-        calendarGrid.setMinHeight(dp(300));
+        calendarGrid.setMinimumHeight(dp(300));
         calendarGrid.setBackground(calendarAreaBackground());
         calendarGrid.setClickable(true);
         calendarGrid.setOnTouchListener(this::handleCalendarSwipeTouch);
@@ -994,7 +994,7 @@ public class MainActivity extends Activity {
         cell.setText(text);
         cell.setTextSize(header ? 13 : 12);
         cell.setGravity(Gravity.CENTER);
-        cell.setMinHeight(dp(52));
+        cell.setMinimumHeight(dp(52));
         cell.setTextColor(Color.rgb(70, 70, 70));
         cell.setPadding(dp(2), dp(4), dp(2), dp(4));
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();

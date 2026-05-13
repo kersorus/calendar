@@ -486,17 +486,13 @@ public class MainActivity extends Activity {
                 .setNegativeButton("Закрыть", null);
 
         if (sessions.isEmpty()) {
-            builder.setMessage(message + "
-
-Записей нет. Нажмите «Добавить», чтобы внести время на эту дату.");
+            builder.setMessage(message + "\n\nЗаписей нет. Нажмите Добавить, чтобы внести время на эту дату.");
         } else {
             String[] items = new String[sessions.size()];
             for (int i = 0; i < sessions.size(); i++) {
                 items[i] = shortSessionLine(sessions.get(i));
             }
-            builder.setMessage(message + "
-
-Нажмите на запись, чтобы отредактировать.");
+            builder.setMessage(message + "\n\nНажмите на запись, чтобы отредактировать.");
             builder.setItems(items, (dialog, which) -> showManualEntryDialog(sessions.get(which), dayStartSeconds));
         }
 

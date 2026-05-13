@@ -6,12 +6,17 @@ public class Profile {
     public static final String PERIOD_DEADLINE = "deadline";
     public static final String PERIOD_NONE = "none";
 
+    public static final int WORK_DAYS_MON_FRI = 31; // bits: Mon Tue Wed Thu Fri
+
     public long id;
     public String name;
     public double targetHours;
     public String periodType;
     public long deadlineSeconds;
     public long createdAtSeconds;
+    public boolean useWorkSchedule;
+    public int workDaysMask;
+    public double workHoursPerDay;
 
     public Profile(
             long id,
@@ -19,7 +24,10 @@ public class Profile {
             double targetHours,
             String periodType,
             long deadlineSeconds,
-            long createdAtSeconds
+            long createdAtSeconds,
+            boolean useWorkSchedule,
+            int workDaysMask,
+            double workHoursPerDay
     ) {
         this.id = id;
         this.name = name;
@@ -27,6 +35,9 @@ public class Profile {
         this.periodType = periodType;
         this.deadlineSeconds = deadlineSeconds;
         this.createdAtSeconds = createdAtSeconds;
+        this.useWorkSchedule = useWorkSchedule;
+        this.workDaysMask = workDaysMask <= 0 ? WORK_DAYS_MON_FRI : workDaysMask;
+        this.workHoursPerDay = workHoursPerDay <= 0.0 ? 8.0 : workHoursPerDay;
     }
 
     public boolean hasRegularGoal() {
@@ -38,7 +49,7 @@ public class Profile {
     }
 
     public boolean hasAnyGoal() {
-        return !PERIOD_NONE.equals(periodType) && targetHours > 0.0;
+        return !PERIOD_NONE.equals(periodType) && (targetHours > 0.0 || useWorkSchedule);
     }
 
     @Override

@@ -206,6 +206,93 @@ public final class DateUtils {
         return Math.max(0, daysIncludingToday - (todayHasWork ? 1 : 0));
     }
 
+    public static int countWorkdaysInRange(long startSeconds, long endExclusiveSeconds, int workDaysMask) {
+        if (endExclusiveSeconds <= startSeconds) {
+            return 0;
+        }
+        Calendar day = Calendar.getInstance();
+        day.setTimeInMillis(startOfDaySeconds(startSeconds) * 1000L);
+
+        Calendar end = Calendar.getInstance();
+        end.setTimeInMillis(startOfDaySeconds(endExclusiveSeconds) * 1000L);
+
+        int count = 0;
+        int guard = 0;
+        while (day.before(end)) {
+            if (isWorkday(day, workDaysMask)) {
+                count++;
+            }
+            day.add(Calendar.DAY_OF_MONTH, 1);
+            guard++;
+            if (guard > 50000) {
+                break;
+            }
+        }
+        return count;
+    }
+
+    public static int elapsedWorkdaysSmart(
+            long startSeconds,
+            long nowSeconds,
+            long endExclusiveSeconds,
+            boolean todayHasWork,
+            int workDaysMask
+    ) {
+        if (nowSeconds < startSeconds) {
+            return 0;
+        }
+        long today = startOfDaySeconds(nowSeconds);
+        int elapsedBeforeToday = countWorkdaysInRange(startSeconds, today, workDaysMask);
+        int elapsed = elapsedBeforeToday + (todayHasWork ? 1 : 0);
+        int total = countWorkdaysInRange(startSeconds, endExclusiveSeconds, workDaysMask);
+        return Math.max(0, Math.min(total, elapsed));
+    }
+
+    public static int availableWorkdaysSmart(
+            long nowSeconds,
+            long endExclusiveSeconds,
+            boolean todayHasWork,
+            int workDaysMask
+    ) {
+        if (nowSeconds >= endExclusiveSeconds) {
+            return 0;
+        }
+        long today = startOfDaySeconds(nowSeconds);
+        int days = countWorkdaysInRange(today, endExclusiveSeconds, workDaysMask);
+        boolean todayIsWorkday = isWorkdaySeconds(today, workDaysMask);
+        if (todayHasWork && todayIsWorkday) {
+            days--;
+        }
+        return Math.max(0, days);
+    }
+
+    public static boolean isWorkdaySeconds(long dayStartSeconds, int workDaysMask) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTimeInMillis(dayStartSeconds * 1000L);
+        return isWorkday(calendar, workDaysMask);
+    }
+
+    private static boolean isWorkday(Calendar calendar, int workDaysMask) {
+        int javaDay = calendar.get(Calendar.DAY_OF_WEEK);
+        int bitIndex;
+        if (javaDay == Calendar.MONDAY) {
+            bitIndex = 0;
+        } else if (javaDay == Calendar.TUESDAY) {
+            bitIndex = 1;
+        } else if (javaDay == Calendar.WEDNESDAY) {
+            bitIndex = 2;
+        } else if (javaDay == Calendar.THURSDAY) {
+            bitIndex = 3;
+        } else if (javaDay == Calendar.FRIDAY) {
+            bitIndex = 4;
+        } else if (javaDay == Calendar.SATURDAY) {
+            bitIndex = 5;
+        } else {
+            bitIndex = 6;
+        }
+        return (workDaysMask & (1 << bitIndex)) != 0;
+    }
+
     private static int daysBetweenStarts(long startDaySeconds, long endDaySeconds) {
         Calendar start = Calendar.getInstance();
         start.setTimeInMillis(startDaySeconds * 1000L);

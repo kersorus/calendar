@@ -15,10 +15,12 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.GridLayout;
 import android.widget.LinearLayout;
@@ -49,6 +51,10 @@ public class MainActivity extends Activity {
     private boolean forecastExpanded = false;
     private boolean firstProfileDialogShown = false;
     private boolean calendarMonthMode = true;
+    private float calendarTouchStartX = 0f;
+    private float calendarTouchStartY = 0f;
+    private long calendarTouchStartTime = 0L;
+    private boolean ignoreNextCalendarClick = false;
     private int visibleYear = DateUtils.currentYear();
     private int visibleMonth = DateUtils.currentMonth();
     private long visibleWeekStartSeconds = DateUtils.weekStartSeconds();
@@ -171,6 +177,7 @@ public class MainActivity extends Activity {
         calendarGrid = new GridLayout(this);
         calendarGrid.setColumnCount(7);
         calendarGrid.setPadding(0, dp(4), 0, dp(10));
+        calendarGrid.setOnTouchListener(this::handleCalendarSwipeTouch);
         root.addView(calendarGrid);
 
         TextView timerTitle = sectionTitle("Таймер");
@@ -206,12 +213,6 @@ public class MainActivity extends Activity {
         stopParams.topMargin = dp(8);
         root.addView(stopButton, stopParams);
 
-        Button manualButton = new Button(this);
-        manualButton.setText("+ запись вручную");
-        manualButton.setOnClickListener(v -> showManualEntryDialog(null, DateUtils.todayStartSeconds()));
-        LinearLayout.LayoutParams manualParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(50));
-        manualParams.topMargin = dp(8);
-        root.addView(manualButton, manualParams);
 
         TextView forecastTitle = sectionTitle("Главный ответ");
         root.addView(forecastTitle);
@@ -368,6 +369,11 @@ public class MainActivity extends Activity {
         LinearLayout targetRow = labeled("Часов", targetInput);
         root.addView(targetRow);
 
+        CheckBox workScheduleCheck = new CheckBox(this);
+        workScheduleCheck.setText("Рабочий график: понедельник–пятница по 8 часов");
+        workScheduleCheck.setPadding(0, dp(6), 0, dp(6));
+        root.addView(workScheduleCheck);
+
         EditText deadlineInput = new EditText(this);
         deadlineInput.setHint("Выберите дату");
         deadlineInput.setSingleLine(true);
@@ -383,7 +389,8 @@ public class MainActivity extends Activity {
             boolean regular = type == 0;
             boolean deadline = type == 1;
             periodRow.setVisibility(regular ? View.VISIBLE : View.GONE);
-            targetRow.setVisibility((regular || deadline) ? View.VISIBLE : View.GONE);
+            workScheduleCheck.setVisibility(regular ? View.VISIBLE : View.GONE);
+            targetRow.setVisibility(((regular && !workScheduleCheck.isChecked()) || deadline) ? View.VISIBLE : View.GONE);
             deadlineRow.setVisibility(deadline ? View.VISIBLE : View.GONE);
             if (regular && targetInput.getText().toString().trim().length() == 0) {
                 targetInput.setText("30");
@@ -400,6 +407,7 @@ public class MainActivity extends Activity {
             public void onNothingSelected(AdapterView<?> parent) {
             }
         });
+        workScheduleCheck.setOnCheckedChangeListener((buttonView, isChecked) -> updateVisibility.run());
         updateVisibility.run();
 
         AlertDialog dialog = new AlertDialog.Builder(this)
@@ -421,14 +429,23 @@ public class MainActivity extends Activity {
             double targetHours = 0.0;
             long deadlineSeconds = 0L;
 
+            boolean useWorkSchedule = false;
+            int workDaysMask = Profile.WORK_DAYS_MON_FRI;
+            double workHoursPerDay = 8.0;
+
             if (type == 0) {
                 periodType = periodSpinner.getSelectedItemPosition() == 1
                         ? Profile.PERIOD_WEEK
                         : Profile.PERIOD_MONTH;
-                targetHours = parsePositiveDouble(targetInput.getText().toString(), -1.0);
-                if (targetHours <= 0.0) {
-                    toast("Введите количество часов больше нуля");
-                    return;
+                useWorkSchedule = workScheduleCheck.isChecked();
+                if (useWorkSchedule) {
+                    targetHours = 0.0;
+                } else {
+                    targetHours = parsePositiveDouble(targetInput.getText().toString(), -1.0);
+                    if (targetHours <= 0.0) {
+                        toast("Введите количество часов больше нуля");
+                        return;
+                    }
                 }
             } else if (type == 1) {
                 periodType = Profile.PERIOD_DEADLINE;
@@ -451,7 +468,16 @@ public class MainActivity extends Activity {
                 periodType = Profile.PERIOD_NONE;
             }
 
-            long profileId = db.saveProfile(0L, name, targetHours, periodType, deadlineSeconds);
+            long profileId = db.saveProfile(
+                    0L,
+                    name,
+                    targetHours,
+                    periodType,
+                    deadlineSeconds,
+                    useWorkSchedule,
+                    workDaysMask,
+                    workHoursPerDay
+            );
             if (profileId <= 0L) {
                 toast("Не удалось сохранить профиль");
                 return;
@@ -783,7 +809,14 @@ public class MainActivity extends Activity {
         }
 
         TextView cell = calendarCell(text, false);
-        cell.setOnClickListener(v -> showDayDialog(profile, dayStart));
+        cell.setOnTouchListener(this::handleCalendarSwipeTouch);
+        cell.setOnClickListener(v -> {
+            if (ignoreNextCalendarClick) {
+                ignoreNextCalendarClick = false;
+                return;
+            }
+            showDayDialog(profile, dayStart);
+        });
         if (hasWork || isDeadline || isToday) {
             cell.setTypeface(Typeface.DEFAULT_BOLD);
         }
@@ -795,6 +828,31 @@ public class MainActivity extends Activity {
             cell.setBackground(todayBackground());
         }
         return cell;
+    }
+
+    private boolean handleCalendarSwipeTouch(View view, MotionEvent event) {
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                calendarTouchStartX = event.getRawX();
+                calendarTouchStartY = event.getRawY();
+                calendarTouchStartTime = System.currentTimeMillis();
+                return false;
+            case MotionEvent.ACTION_UP:
+                float deltaX = event.getRawX() - calendarTouchStartX;
+                float deltaY = event.getRawY() - calendarTouchStartY;
+                long duration = System.currentTimeMillis() - calendarTouchStartTime;
+
+                if (Math.abs(deltaX) >= dp(70)
+                        && Math.abs(deltaX) > Math.abs(deltaY) * 1.4f
+                        && duration < 900L) {
+                    ignoreNextCalendarClick = true;
+                    moveCalendar(deltaX < 0 ? 1 : -1);
+                    return true;
+                }
+                return false;
+            default:
+                return false;
+        }
     }
 
     private void moveCalendar(int direction) {
@@ -889,17 +947,35 @@ public class MainActivity extends Activity {
         double workedHours = NativeBridge.secondsToHours(workedSeconds);
 
         boolean todayHasWork = db.hasWorkOnDay(profile.id, DateUtils.todayStartSeconds());
-        int daysInPeriod = DateUtils.periodDays(from, toExclusive);
-        int daysPassed = DateUtils.elapsedPeriodDaysSmart(from, now, toExclusive, todayHasWork);
-        int daysLeftAfterToday = DateUtils.daysLeftAfterTodaySmart(from, now, toExclusive, todayHasWork);
-        int daysForWork = DateUtils.daysAvailableForWorkSmart(now, toExclusive, todayHasWork);
+        boolean workSchedule = profile.useWorkSchedule && profile.hasRegularGoal();
+        int daysInPeriod;
+        int daysPassed;
+        int daysLeftAfterToday;
+        int daysForWork;
+        double targetHours;
+        double expectedHours;
 
-        double expectedHours = NativeBridge.expectedHours(profile.targetHours, daysInPeriod, daysPassed);
+        if (workSchedule) {
+            daysInPeriod = DateUtils.countWorkdaysInRange(from, toExclusive, profile.workDaysMask);
+            daysPassed = DateUtils.elapsedWorkdaysSmart(from, now, toExclusive, todayHasWork, profile.workDaysMask);
+            daysForWork = DateUtils.availableWorkdaysSmart(now, toExclusive, todayHasWork, profile.workDaysMask);
+            daysLeftAfterToday = Math.max(0, daysInPeriod - daysPassed);
+            targetHours = daysInPeriod * profile.workHoursPerDay;
+            expectedHours = daysPassed * profile.workHoursPerDay;
+        } else {
+            daysInPeriod = DateUtils.periodDays(from, toExclusive);
+            daysPassed = DateUtils.elapsedPeriodDaysSmart(from, now, toExclusive, todayHasWork);
+            daysLeftAfterToday = DateUtils.daysLeftAfterTodaySmart(from, now, toExclusive, todayHasWork);
+            daysForWork = DateUtils.daysAvailableForWorkSmart(now, toExclusive, todayHasWork);
+            targetHours = profile.targetHours;
+            expectedHours = NativeBridge.expectedHours(targetHours, daysInPeriod, daysPassed);
+        }
+
         double currentBalance = NativeBridge.balance(workedHours, expectedHours);
-        double finalBalance = NativeBridge.balance(workedHours, profile.targetHours);
-        double remainingHours = Math.max(0.0, profile.targetHours - workedHours);
+        double finalBalance = NativeBridge.balance(workedHours, targetHours);
+        double remainingHours = Math.max(0.0, targetHours - workedHours);
         double requiredDaily = NativeBridge.requiredDailyHours(remainingHours, daysForWork);
-        double requiredWeekly = requiredDaily * 7.0;
+        double requiredWeekly = requiredDaily * Math.max(1, workSchedule ? DateUtils.countWorkdaysInRange(DateUtils.weekStartSeconds(), DateUtils.nextWeekStartSeconds(), profile.workDaysMask) : 7);
 
         String main;
         if (remainingHours <= 0.0001) {
@@ -915,7 +991,8 @@ public class MainActivity extends Activity {
                 "Профиль: %s\n" +
                         "Период: %s\n" +
                         "Норма: %s ч\n" +
-                        "Прошло дней: %d из %d\n" +
+                        "График: %s\n" +
+                        "Расчётные дни: %d из %d\n" +
                         "Сегодня считается пройденным: %s\n" +
                         "Осталось дней: %d\n" +
                         "Дней для добора: %d\n\n" +
@@ -928,7 +1005,8 @@ public class MainActivity extends Activity {
                         "Итоговый баланс, если остановиться сейчас: %s ч",
                 profile.name,
                 periodLabel,
-                formatHours(profile.targetHours),
+                formatHours(targetHours),
+                workSchedule ? "Пн–Пт по " + formatHours(profile.workHoursPerDay) + " ч" : "календарные дни",
                 daysPassed,
                 daysInPeriod,
                 todayHasWork ? "да" : "нет",
@@ -982,6 +1060,9 @@ public class MainActivity extends Activity {
     private String formatProfileShort(Profile profile) {
         if (Profile.PERIOD_NONE.equals(profile.periodType)) {
             return "простой учёт · без нормы";
+        }
+        if (profile.useWorkSchedule && profile.hasRegularGoal()) {
+            return "Пн–Пт · " + formatHours(profile.workHoursPerDay) + " ч/день · " + periodTitle(profile);
         }
         return formatHours(profile.targetHours) + " ч · " + periodTitle(profile);
     }

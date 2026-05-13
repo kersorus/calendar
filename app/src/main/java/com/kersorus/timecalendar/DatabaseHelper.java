@@ -13,7 +13,7 @@ import java.util.Locale;
 
 public class DatabaseHelper extends SQLiteOpenHelper {
     private static final String DB_NAME = "time_calendar.db";
-    private static final int DB_VERSION = 4;
+    private static final int DB_VERSION = 5;
 
     public DatabaseHelper(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
@@ -45,6 +45,20 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             } catch (Exception ignored) {
             }
         }
+        if (oldVersion < 5) {
+            try {
+                db.execSQL("ALTER TABLE profiles ADD COLUMN use_work_schedule INTEGER NOT NULL DEFAULT 0");
+            } catch (Exception ignored) {
+            }
+            try {
+                db.execSQL("ALTER TABLE profiles ADD COLUMN work_days_mask INTEGER NOT NULL DEFAULT " + Profile.WORK_DAYS_MON_FRI);
+            } catch (Exception ignored) {
+            }
+            try {
+                db.execSQL("ALTER TABLE profiles ADD COLUMN work_hours_per_day REAL NOT NULL DEFAULT 8.0");
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private void createProfilesTable(SQLiteDatabase db) {
@@ -55,7 +69,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                         "target_hours REAL NOT NULL, " +
                         "period_type TEXT NOT NULL, " +
                         "deadline_seconds INTEGER NOT NULL DEFAULT 0, " +
-                        "created_at_seconds INTEGER NOT NULL" +
+                        "created_at_seconds INTEGER NOT NULL, " +
+                        "use_work_schedule INTEGER NOT NULL DEFAULT 0, " +
+                        "work_days_mask INTEGER NOT NULL DEFAULT " + Profile.WORK_DAYS_MON_FRI + ", " +
+                        "work_hours_per_day REAL NOT NULL DEFAULT 8.0" +
                         ")"
         );
     }
@@ -94,6 +111,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         values.put("period_type", Profile.PERIOD_MONTH);
         values.put("deadline_seconds", 0L);
         values.put("created_at_seconds", DateUtils.todayStartSeconds());
+        values.put("use_work_schedule", 0);
+        values.put("work_days_mask", Profile.WORK_DAYS_MON_FRI);
+        values.put("work_hours_per_day", 8.0);
 
         return db.insert("profiles", null, values);
     }
@@ -101,7 +121,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     public ArrayList<Profile> getProfiles() {
         SQLiteDatabase db = getReadableDatabase();
         Cursor cursor = db.rawQuery(
-                "SELECT id, name, target_hours, period_type, deadline_seconds, created_at_seconds " +
+                "SELECT id, name, target_hours, period_type, deadline_seconds, created_at_seconds, " +
+                        "use_work_schedule, work_days_mask, work_hours_per_day " +
                         "FROM profiles ORDER BY id ASC",
                 null
         );
@@ -114,7 +135,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     cursor.getDouble(2),
                     cursor.getString(3),
                     cursor.getLong(4),
-                    cursor.getLong(5)
+                    cursor.getLong(5),
+                    cursor.getInt(6) == 1,
+                    cursor.getInt(7),
+                    cursor.getDouble(8)
             ));
         }
         cursor.close();
@@ -125,7 +149,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     public Profile getProfileById(long profileId) {
         SQLiteDatabase db = getReadableDatabase();
         Cursor cursor = db.rawQuery(
-                "SELECT id, name, target_hours, period_type, deadline_seconds, created_at_seconds " +
+                "SELECT id, name, target_hours, period_type, deadline_seconds, created_at_seconds, " +
+                        "use_work_schedule, work_days_mask, work_hours_per_day " +
                         "FROM profiles WHERE id = ? LIMIT 1",
                 new String[]{String.valueOf(profileId)}
         );
@@ -138,7 +163,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     cursor.getDouble(2),
                     cursor.getString(3),
                     cursor.getLong(4),
-                    cursor.getLong(5)
+                    cursor.getLong(5),
+                    cursor.getInt(6) == 1,
+                    cursor.getInt(7),
+                    cursor.getDouble(8)
             );
         }
         cursor.close();
@@ -152,12 +180,28 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             String periodType,
             long deadlineSeconds
     ) {
+        return saveProfile(id, name, targetHours, periodType, deadlineSeconds, false, Profile.WORK_DAYS_MON_FRI, 8.0);
+    }
+
+    public long saveProfile(
+            long id,
+            String name,
+            double targetHours,
+            String periodType,
+            long deadlineSeconds,
+            boolean useWorkSchedule,
+            int workDaysMask,
+            double workHoursPerDay
+    ) {
         SQLiteDatabase db = getWritableDatabase();
         ContentValues values = new ContentValues();
         values.put("name", name);
         values.put("target_hours", targetHours);
         values.put("period_type", periodType);
         values.put("deadline_seconds", deadlineSeconds);
+        values.put("use_work_schedule", useWorkSchedule ? 1 : 0);
+        values.put("work_days_mask", workDaysMask <= 0 ? Profile.WORK_DAYS_MON_FRI : workDaysMask);
+        values.put("work_hours_per_day", workHoursPerDay <= 0.0 ? 8.0 : workHoursPerDay);
 
         if (id > 0L) {
             db.update("profiles", values, "id = ?", new String[]{String.valueOf(id)});

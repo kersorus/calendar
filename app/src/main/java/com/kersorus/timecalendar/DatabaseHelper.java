@@ -6,16 +6,14 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.HashMap;
-import java.util.Date;
 import java.util.Locale;
 
 public class DatabaseHelper extends SQLiteOpenHelper {
     private static final String DB_NAME = "time_calendar.db";
-    private static final int DB_VERSION = 3;
+    private static final int DB_VERSION = 4;
 
     public DatabaseHelper(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
@@ -41,6 +39,12 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         if (oldVersion < 3) {
             createProfilesTable(db);
         }
+        if (oldVersion < 4) {
+            try {
+                db.execSQL("ALTER TABLE sessions ADD COLUMN comment TEXT NOT NULL DEFAULT ''");
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private void createProfilesTable(SQLiteDatabase db) {
@@ -65,7 +69,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                         "start_time INTEGER NOT NULL, " +
                         "end_time INTEGER NOT NULL, " +
                         "paused_seconds INTEGER NOT NULL, " +
-                        "worked_seconds INTEGER NOT NULL" +
+                        "worked_seconds INTEGER NOT NULL, " +
+                        "comment TEXT NOT NULL DEFAULT ''" +
                         ")"
         );
     }
@@ -175,13 +180,25 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         return insertedId;
     }
 
-    public void addSession(
+    public long addSession(
             long profileId,
             String profile,
             long startTime,
             long endTime,
             long pausedSeconds,
             long workedSeconds
+    ) {
+        return addSession(profileId, profile, startTime, endTime, pausedSeconds, workedSeconds, "");
+    }
+
+    public long addSession(
+            long profileId,
+            String profile,
+            long startTime,
+            long endTime,
+            long pausedSeconds,
+            long workedSeconds,
+            String comment
     ) {
         ContentValues values = new ContentValues();
         values.put("profile_id", profileId);
@@ -190,9 +207,78 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         values.put("end_time", endTime);
         values.put("paused_seconds", pausedSeconds);
         values.put("worked_seconds", workedSeconds);
+        values.put("comment", comment == null ? "" : comment.trim());
 
         SQLiteDatabase db = getWritableDatabase();
-        db.insert("sessions", null, values);
+        return db.insert("sessions", null, values);
+    }
+
+    public void updateSession(
+            long sessionId,
+            long startTime,
+            long endTime,
+            long workedSeconds,
+            String comment
+    ) {
+        ContentValues values = new ContentValues();
+        values.put("start_time", startTime);
+        values.put("end_time", endTime);
+        values.put("paused_seconds", 0L);
+        values.put("worked_seconds", workedSeconds);
+        values.put("comment", comment == null ? "" : comment.trim());
+
+        SQLiteDatabase db = getWritableDatabase();
+        db.update("sessions", values, "id = ?", new String[]{String.valueOf(sessionId)});
+    }
+
+    public void deleteSession(long sessionId) {
+        SQLiteDatabase db = getWritableDatabase();
+        db.delete("sessions", "id = ?", new String[]{String.valueOf(sessionId)});
+    }
+
+    public TimeSession getSessionById(long sessionId) {
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor cursor = db.rawQuery(
+                "SELECT id, profile_id, profile, start_time, end_time, paused_seconds, worked_seconds, comment " +
+                        "FROM sessions WHERE id = ? LIMIT 1",
+                new String[]{String.valueOf(sessionId)}
+        );
+
+        TimeSession session = null;
+        if (cursor.moveToFirst()) {
+            session = readSession(cursor);
+        }
+        cursor.close();
+        return session;
+    }
+
+    public ArrayList<TimeSession> getSessions(long profileId, int limit) {
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor cursor = db.rawQuery(
+                "SELECT id, profile_id, profile, start_time, end_time, paused_seconds, worked_seconds, comment " +
+                        "FROM sessions WHERE profile_id = ? ORDER BY start_time DESC LIMIT ?",
+                new String[]{String.valueOf(profileId), String.valueOf(limit)}
+        );
+
+        ArrayList<TimeSession> sessions = new ArrayList<>();
+        while (cursor.moveToNext()) {
+            sessions.add(readSession(cursor));
+        }
+        cursor.close();
+        return sessions;
+    }
+
+    private TimeSession readSession(Cursor cursor) {
+        return new TimeSession(
+                cursor.getLong(0),
+                cursor.getLong(1),
+                cursor.getString(2),
+                cursor.getLong(3),
+                cursor.getLong(4),
+                cursor.getLong(5),
+                cursor.getLong(6),
+                cursor.getString(7)
+        );
     }
 
     public long getWorkedSecondsForRange(long profileId, long from, long to) {
@@ -217,6 +303,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         return result;
     }
 
+    public boolean hasWorkOnDay(long profileId, long dayStartSeconds) {
+        long dayEndSeconds = dayStartSeconds + 24L * 60L * 60L;
+        return getWorkedSecondsForRange(profileId, dayStartSeconds, dayEndSeconds) > 0L;
+    }
 
     public HashMap<Integer, Long> getWorkedSecondsByDay(long profileId, int year, int month) {
         long from = DateUtils.monthStartSeconds(year, month);
@@ -251,42 +341,25 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public String getLastSessionsText(long profileId, int limit) {
-        SQLiteDatabase db = getReadableDatabase();
-
-        Cursor cursor = db.rawQuery(
-                "SELECT start_time, end_time, worked_seconds FROM sessions " +
-                        "WHERE profile_id = ? ORDER BY start_time DESC LIMIT ?",
-                new String[]{String.valueOf(profileId), String.valueOf(limit)}
-        );
-
-        StringBuilder builder = new StringBuilder();
-        SimpleDateFormat dateFormat =
-                new SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault());
-
-        while (cursor.moveToNext()) {
-            long start = cursor.getLong(0);
-            long end = cursor.getLong(1);
-            long workedSeconds = cursor.getLong(2);
-
-            String startText = dateFormat.format(new Date(start * 1000L));
-            String endText = dateFormat.format(new Date(end * 1000L));
-            double hours = NativeBridge.secondsToHours(workedSeconds);
-
-            builder
-                    .append(startText)
-                    .append(" — ")
-                    .append(endText)
-                    .append("\n")
-                    .append(String.format(Locale.getDefault(), "%.2f ч", hours))
-                    .append("\n\n");
-        }
-
-        cursor.close();
-
-        if (builder.length() == 0) {
+        ArrayList<TimeSession> sessions = getSessions(profileId, limit);
+        if (sessions.isEmpty()) {
             return "Сессий по этому профилю пока нет.";
         }
 
+        StringBuilder builder = new StringBuilder();
+        for (TimeSession session : sessions) {
+            builder.append(formatSessionLine(session)).append("\n\n");
+        }
         return builder.toString();
+    }
+
+    public static String formatSessionLine(TimeSession session) {
+        String line = DateUtils.formatDateTime(session.startTime) + " — " +
+                DateUtils.formatDateTime(session.endTime) + "\n" +
+                String.format(Locale.getDefault(), "%.2f ч", NativeBridge.secondsToHours(session.workedSeconds));
+        if (session.comment != null && session.comment.trim().length() > 0) {
+            line += " · " + session.comment.trim();
+        }
+        return line;
     }
 }

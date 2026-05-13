@@ -170,6 +170,13 @@ public class MainActivity extends Activity {
         stopParams.topMargin = dp(8);
         root.addView(stopButton, stopParams);
 
+        Button manualButton = new Button(this);
+        manualButton.setText("+ запись вручную");
+        manualButton.setOnClickListener(v -> showManualEntryDialog(null));
+        LinearLayout.LayoutParams manualParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(50));
+        manualParams.topMargin = dp(8);
+        root.addView(manualButton, manualParams);
+
         TextView forecastTitle = sectionTitle("Главный ответ");
         root.addView(forecastTitle);
 
@@ -445,11 +452,114 @@ public class MainActivity extends Activity {
             toast("Сначала создайте профиль");
             return;
         }
+        ArrayList<TimeSession> sessions = db.getSessions(profile.id, 200);
+        if (sessions.isEmpty()) {
+            toast("Записей пока нет");
+            return;
+        }
+
+        String[] items = new String[sessions.size()];
+        for (int i = 0; i < sessions.size(); i++) {
+            items[i] = shortSessionLine(sessions.get(i));
+        }
+
         new AlertDialog.Builder(this)
                 .setTitle("Полный лог: " + profile.name)
-                .setMessage(db.getLastSessionsText(profile.id, 200))
+                .setItems(items, (dialog, which) -> showManualEntryDialog(sessions.get(which)))
                 .setPositiveButton("Закрыть", null)
                 .show();
+    }
+
+    private void showManualEntryDialog(TimeSession sessionToEdit) {
+        Profile profile = currentProfile();
+        if (profile == null) {
+            showCreateProfileDialog(true);
+            return;
+        }
+
+        boolean editing = sessionToEdit != null;
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(4);
+        root.setPadding(pad, pad, pad, pad);
+
+        EditText dateInput = new EditText(this);
+        dateInput.setHint("ГГГГ-ММ-ДД");
+        dateInput.setSingleLine(true);
+        dateInput.setInputType(InputType.TYPE_CLASS_DATETIME);
+        dateInput.setText(editing ? DateUtils.formatDate(sessionToEdit.startTime) : DateUtils.formatDate(DateUtils.nowSeconds()));
+        root.addView(labeled("Дата", dateInput));
+
+        EditText hoursInput = new EditText(this);
+        hoursInput.setHint("Например 1.5");
+        hoursInput.setSingleLine(true);
+        hoursInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        hoursInput.setText(editing ? formatHours(NativeBridge.secondsToHours(sessionToEdit.workedSeconds)) : "1.00");
+        root.addView(labeled("Часов", hoursInput));
+
+        EditText commentInput = new EditText(this);
+        commentInput.setHint("Комментарий, необязательно");
+        commentInput.setSingleLine(false);
+        commentInput.setMinLines(2);
+        commentInput.setText(editing ? sessionToEdit.comment : "");
+        root.addView(labeled("Комментарий", commentInput));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(editing ? "Редактировать запись" : "Добавить запись")
+                .setView(root)
+                .setPositiveButton(editing ? "Сохранить" : "Добавить", null)
+                .setNegativeButton("Отмена", null)
+                .setNeutralButton(editing ? "Удалить" : null, null)
+                .create();
+
+        dialog.setOnShowListener(d -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                long dayStart;
+                try {
+                    dayStart = DateUtils.parseDayStartSeconds(dateInput.getText().toString().trim());
+                } catch (Exception e) {
+                    toast("Введите дату в формате ГГГГ-ММ-ДД");
+                    return;
+                }
+
+                double hours = parsePositiveDouble(hoursInput.getText().toString(), -1.0);
+                if (hours <= 0.0) {
+                    toast("Введите количество часов больше нуля");
+                    return;
+                }
+
+                long workedSeconds = Math.round(hours * 3600.0);
+                long startTime = dayStart + 12L * 3600L;
+                long endTime = startTime + workedSeconds;
+                String comment = commentInput.getText().toString().trim();
+
+                if (editing) {
+                    db.updateSession(sessionToEdit.id, startTime, endTime, workedSeconds, comment);
+                } else {
+                    db.addSession(profile.id, profile.name, startTime, endTime, 0L, workedSeconds, comment);
+                }
+
+                dialog.dismiss();
+                refreshEverything();
+            });
+
+            Button neutral = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            if (neutral != null && editing) {
+                neutral.setOnClickListener(v -> new AlertDialog.Builder(this)
+                        .setTitle("Удалить запись?")
+                        .setMessage(shortSessionLine(sessionToEdit))
+                        .setPositiveButton("Удалить", (confirmDialog, which) -> {
+                            db.deleteSession(sessionToEdit.id);
+                            dialog.dismiss();
+                            refreshEverything();
+                        })
+                        .setNegativeButton("Отмена", null)
+                        .show());
+            }
+        });
+
+        dialog.show();
     }
 
     private void toggleForecast() {
@@ -561,16 +671,18 @@ public class MainActivity extends Activity {
         long workedSeconds = db.getWorkedSecondsForRange(profile.id, from, toExclusive);
         double workedHours = NativeBridge.secondsToHours(workedSeconds);
 
+        boolean todayHasWork = db.hasWorkOnDay(profile.id, DateUtils.todayStartSeconds());
         int daysInPeriod = DateUtils.periodDays(from, toExclusive);
-        int daysPassed = DateUtils.elapsedPeriodDaysIncludingToday(from, now, toExclusive);
-        int daysLeftAfterToday = DateUtils.daysLeftAfterToday(from, now, toExclusive);
-        int daysForWork = DateUtils.daysAvailableForWorkIncludingToday(now, toExclusive);
+        int daysPassed = DateUtils.elapsedPeriodDaysSmart(from, now, toExclusive, todayHasWork);
+        int daysLeftAfterToday = DateUtils.daysLeftAfterTodaySmart(from, now, toExclusive, todayHasWork);
+        int daysForWork = DateUtils.daysAvailableForWorkSmart(now, toExclusive, todayHasWork);
 
         double expectedHours = NativeBridge.expectedHours(profile.targetHours, daysInPeriod, daysPassed);
         double currentBalance = NativeBridge.balance(workedHours, expectedHours);
         double finalBalance = NativeBridge.balance(workedHours, profile.targetHours);
         double remainingHours = Math.max(0.0, profile.targetHours - workedHours);
         double requiredDaily = NativeBridge.requiredDailyHours(remainingHours, daysForWork);
+        double requiredWeekly = requiredDaily * 7.0;
 
         String main;
         if (remainingHours <= 0.0001) {
@@ -587,19 +699,22 @@ public class MainActivity extends Activity {
                         "Период: %s\n" +
                         "Норма: %s ч\n" +
                         "Прошло дней: %d из %d\n" +
-                        "Осталось дней после сегодня: %d\n" +
-                        "Дней для добора, включая сегодня: %d\n\n" +
+                        "Сегодня считается пройденным: %s\n" +
+                        "Осталось дней: %d\n" +
+                        "Дней для добора: %d\n\n" +
                         "План к сегодня: %s ч\n" +
                         "Факт: %s ч\n" +
                         "Баланс сейчас: %s ч\n\n" +
                         "Осталось до цели: %s ч\n" +
                         "Нужно в день: %s ч\n" +
+                        "Нужно в неделю: %s ч\n" +
                         "Итоговый баланс, если остановиться сейчас: %s ч",
                 profile.name,
                 periodLabel,
                 formatHours(profile.targetHours),
                 daysPassed,
                 daysInPeriod,
+                todayHasWork ? "да" : "нет",
                 daysLeftAfterToday,
                 daysForWork,
                 formatHours(expectedHours),
@@ -607,6 +722,7 @@ public class MainActivity extends Activity {
                 formatSignedHours(currentBalance),
                 formatHours(remainingHours),
                 formatHours(requiredDaily),
+                formatHours(requiredWeekly),
                 formatSignedHours(finalBalance)
         );
 
@@ -655,6 +771,15 @@ public class MainActivity extends Activity {
 
     private String formatProfileLine(Profile profile) {
         return profile.name + " — " + formatProfileShort(profile);
+    }
+
+    private String shortSessionLine(TimeSession session) {
+        String line = DateUtils.formatDateTime(session.startTime) + " · " +
+                formatHours(NativeBridge.secondsToHours(session.workedSeconds)) + " ч";
+        if (session.comment != null && session.comment.trim().length() > 0) {
+            line += " · " + session.comment.trim();
+        }
+        return line;
     }
 
     private void startTimer() {

@@ -30,6 +30,13 @@ public final class DateUtils {
         return calendar.getTimeInMillis() / 1000L;
     }
 
+    public static long tomorrowStartSeconds() {
+        Calendar calendar = Calendar.getInstance();
+        moveToDayStart(calendar);
+        calendar.add(Calendar.DAY_OF_MONTH, 1);
+        return calendar.getTimeInMillis() / 1000L;
+    }
+
     public static long startOfDaySeconds(long seconds) {
         Calendar calendar = Calendar.getInstance();
         calendar.setTimeInMillis(seconds * 1000L);
@@ -106,12 +113,31 @@ public final class DateUtils {
         return calendar.getTimeInMillis() / 1000L;
     }
 
+    public static long parseDayStartSeconds(String yyyyMmDd) throws ParseException {
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+        format.setLenient(false);
+        Date date = format.parse(yyyyMmDd);
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTime(date);
+        moveToDayStart(calendar);
+        return calendar.getTimeInMillis() / 1000L;
+    }
+
     public static String formatDeadline(long deadlineSeconds) {
         if (deadlineSeconds <= 0L) {
             return "";
         }
+        return formatDate(deadlineSeconds);
+    }
+
+    public static String formatDate(long seconds) {
         SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-        return format.format(new Date(deadlineSeconds * 1000L));
+        return format.format(new Date(seconds * 1000L));
+    }
+
+    public static String formatDateTime(long seconds) {
+        SimpleDateFormat format = new SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault());
+        return format.format(new Date(seconds * 1000L));
     }
 
     public static int periodDays(long startSeconds, long endExclusiveSeconds) {
@@ -123,10 +149,11 @@ public final class DateUtils {
         return Math.max(1, daysBetweenStarts(start, end));
     }
 
-    public static int elapsedPeriodDaysIncludingToday(
+    public static int elapsedPeriodDaysSmart(
             long startSeconds,
             long nowSeconds,
-            long endExclusiveSeconds
+            long endExclusiveSeconds,
+            boolean todayHasWork
     ) {
         if (nowSeconds < startSeconds) {
             return 0;
@@ -134,26 +161,33 @@ public final class DateUtils {
         int total = periodDays(startSeconds, endExclusiveSeconds);
         long start = startOfDaySeconds(startSeconds);
         long today = startOfDaySeconds(nowSeconds);
-        int elapsed = daysBetweenStarts(start, today) + 1;
+        int elapsedBeforeToday = daysBetweenStarts(start, today);
+        int elapsed = elapsedBeforeToday + (todayHasWork ? 1 : 0);
         if (elapsed < 0) {
             return 0;
         }
         return Math.min(total, elapsed);
     }
 
-    public static int daysLeftAfterToday(long startSeconds, long nowSeconds, long endExclusiveSeconds) {
+    public static int daysLeftAfterTodaySmart(
+            long startSeconds,
+            long nowSeconds,
+            long endExclusiveSeconds,
+            boolean todayHasWork
+    ) {
         int total = periodDays(startSeconds, endExclusiveSeconds);
-        int elapsed = elapsedPeriodDaysIncludingToday(startSeconds, nowSeconds, endExclusiveSeconds);
+        int elapsed = elapsedPeriodDaysSmart(startSeconds, nowSeconds, endExclusiveSeconds, todayHasWork);
         return Math.max(0, total - elapsed);
     }
 
-    public static int daysAvailableForWorkIncludingToday(long nowSeconds, long endExclusiveSeconds) {
+    public static int daysAvailableForWorkSmart(long nowSeconds, long endExclusiveSeconds, boolean todayHasWork) {
         if (nowSeconds >= endExclusiveSeconds) {
             return 0;
         }
         long today = startOfDaySeconds(nowSeconds);
         long end = startOfDaySeconds(endExclusiveSeconds);
-        return Math.max(1, daysBetweenStarts(today, end));
+        int daysIncludingToday = Math.max(1, daysBetweenStarts(today, end));
+        return Math.max(0, daysIncludingToday - (todayHasWork ? 1 : 0));
     }
 
     private static int daysBetweenStarts(long startDaySeconds, long endDaySeconds) {

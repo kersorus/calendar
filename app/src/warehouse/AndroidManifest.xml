@@ -3,6 +3,20 @@
 
     <application
         android:label="Складская зарплата"
-        tools:replace="android:label" />
+        tools:replace="android:label">
+
+        <activity
+            android:name="com.kersorus.timecalendar.WarehouseActivity"
+            android:exported="true"
+            tools:node="merge">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+    </application>
 
 </manifest>

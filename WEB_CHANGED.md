@@ -1,11 +1,1 @@
-# Salary PWA UI fix 0.3
-
-- Исправлен повреждённый JavaScript календаря.
-- Восстановлены все ячейки месяца и карточки выплат.
-- Исправлена логика графиков 2/2, 3/3 и 5/2.
-- Исправлено построение периодов выплат.
-- Service Worker обновлён до `las-pwa-v3`.
-- JS/CSS/HTML загружаются по стратегии network-first.
-- Новый Service Worker сразу активируется через `skipWaiting()` и `clients.claim()`.
-- Android Action не запускается при изменениях только в `web/`.
-- Pages Action запускается только при изменениях веб-версии.
+Fix v0.4: restore storage/ui bootstrap order and LaStorage compatibility layer.

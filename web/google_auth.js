@@ -26,9 +26,9 @@ function readJson(key, fallback = null) {
 
 function normalizedApiBase(config) {
   const raw = String(config.API_BASE_URL || "").trim().replace(/\/$/, "");
-  if (!raw || raw.includes("YOUR-CLOUD-RUN-SERVICE")) {
+  if (!raw || raw.includes("YOUR-CLOUDFLARE-SUBDOMAIN")) {
     throw new GoogleAuthError(
-      "Укажите адрес Cloud Run в web/config.js.",
+      "Укажите адрес Cloudflare Worker в web/config.js.",
       "API_URL_MISSING",
     );
   }

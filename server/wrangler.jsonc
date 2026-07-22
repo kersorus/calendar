@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "las-calendar-sync",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-22",
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "GOOGLE_CLIENT_ID": "446294536354-ako75ioe9j7ssjpulsr6g0996ftifmr1.apps.googleusercontent.com",
+    "ALLOWED_ORIGINS": "https://kersorus.github.io",
+    "SESSION_IDLE_DAYS": "180",
+    "DRIVE_BACKUP_FILE_NAME": "las_salary_backup.json"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "USERS",
+        "class_name": "UserState"
+      },
+      {
+        "name": "SESSIONS",
+        "class_name": "SessionState"
+      }
+    ]
+  },
+  "exports": {
+    "UserState": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "SessionState": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  }
+}

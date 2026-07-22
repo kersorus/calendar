@@ -6,30 +6,32 @@
 
 - Android-приложение с вариантами `timecalendar` и `warehouse`;
 - устанавливаемая PWA в каталоге `web`;
-- сервер защищённой синхронизации в каталоге `server`.
+- Cloudflare Worker защищённой синхронизации в каталоге `server`.
 
-## Как работает синхронизация
+## Синхронизация
 
 PWA всегда сохраняет рабочую копию локально и продолжает работать без интернета. После подключения Google резервная копия хранится в закрытом пространстве `appDataFolder` Google Drive.
 
 ```text
 PWA ── Google Identity Services ── одноразовый OAuth code
  │                                      │
- └────────────── Cloud Run API ◄────────┘
-                    │       │
-               Firestore   Google Drive appDataFolder
+ └──────── Cloudflare Worker ◄──────────┘
+                 │           │
+        Durable Objects     Google Drive appDataFolder
 ```
 
-Браузер не получает Google access token или refresh token. Одноразовый код передаётся backend, refresh token шифруется AES-256-GCM и хранится в Firestore. На устройстве остаётся только случайный идентификатор сессии приложения.
+Браузер не получает Google access token или refresh token. Одноразовый код передаётся Worker, refresh token шифруется AES-256-GCM и хранится в SQLite-backed Durable Object пользователя. На устройстве остаётся только случайный ключ серверной сессии.
 
-При обмене независимо сравниваются:
+Для каждого Google-аккаунта используется отдельный Durable Object. Все операции синхронизации одного аккаунта выполняются последовательно, поэтому одновременные записи с нескольких устройств не конфликтуют на уровне сервера.
+
+При объединении независимо сравниваются:
 
 - настройки расчёта;
 - параметры графика;
 - каждая смена по дате;
 - отметки об удалении смен.
 
-Параллельная запись одного аккаунта блокируется короткой серверной арендой. Если локальные данные изменились во время сетевого запроса, устаревший ответ не применяется и синхронизация повторяется. Новый телефон с настройками по умолчанию сначала загружает облачную копию и не может затереть её пустыми данными.
+Если локальные данные изменились во время сетевого запроса, устаревший ответ не применяется и синхронизация повторяется. Новый телефон с настройками по умолчанию сначала загружает облачную копию и не может затереть её пустыми данными.
 
 ## Структура
 
@@ -47,59 +49,64 @@ web/
   privacy.html               политика конфиденциальности
   terms.html                 условия использования
 server/
-  src/app.js                 HTTP API, CORS, CSRF-защита и ошибки
-  src/auth-service.js        обмен OAuth code и обновление Google-токенов
-  src/drive-service.js       чтение, объединение и запись копии в Drive
-  src/store.js               пользователи, сессии и блокировки Firestore
+  src/index.js               HTTP API, CORS, OAuth code exchange и маршрутизация
+  src/user-state.js          пользователь, refresh token и последовательная синхронизация
+  src/session-state.js       серверная сессия устройства и автоматическое истечение
+  src/google-oauth.js        обмен, проверка и обновление Google-токенов
+  src/google-drive.js        операции с закрытой папкой Google Drive
   src/cloud-record.js        модель данных и разрешение конфликтов
-  src/crypto.js              шифрование refresh token и хеширование сессий
-  test/                      тесты объединения и гонок синхронизации
+  src/crypto.js              AES-GCM и хеширование ключей сессий
+  wrangler.jsonc             конфигурация Worker и Durable Objects
+  test/                      тесты миграции, конфликтов, OAuth и шифрования
 .github/workflows/
-  cloud.yml                  проверки frontend и backend
+  cloud.yml                  проверки frontend и Worker
   pages.yml                  публикация каталога web в GitHub Pages
 ```
 
-## Настройка PWA
+## Публичная конфигурация PWA
 
-Публичные параметры находятся в `web/config.js`:
+`web/config.js`:
 
 ```js
 window.LAS_CONFIG = Object.freeze({
-  API_BASE_URL: "https://SERVICE-URL.run.app",
-  GOOGLE_CLIENT_ID: "000000000000-example.apps.googleusercontent.com",
+  API_BASE_URL: "https://las-calendar-sync.example.workers.dev",
+  GOOGLE_CLIENT_ID: "446294536354-ako75ioe9j7ssjpulsr6g0996ftifmr1.apps.googleusercontent.com",
   CLOUD_SCHEMA_VERSION: 3,
   AUTO_SYNC_DEBOUNCE_MS: 1200,
 });
 ```
 
-`GOOGLE_CLIENT_ID` не является секретом. Client Secret и ключ шифрования в `web` добавлять нельзя.
+`GOOGLE_CLIENT_ID` не является секретом. Google Client Secret и ключ шифрования в `web` добавлять нельзя.
 
-Для OAuth-клиента типа **Web application** укажите Authorized JavaScript origin сайта, например:
+Для OAuth-клиента типа **Web application** Authorized JavaScript origin должен быть:
 
 ```text
 https://kersorus.github.io
 ```
 
-Для popup Code Model отдельный OAuth redirect URI не требуется. Backend при обмене кода использует точный origin страницы.
+Для GIS Popup Code Model отдельный OAuth redirect URI не требуется. Worker при обмене кода использует точный origin страницы.
 
-GitHub Actions публикует содержимое `web/` после push в `main`. В настройках репозитория Pages должен быть выбран источник **GitHub Actions**.
+## Развёртывание Cloudflare Worker
 
-## Настройка backend
+Worker публикуется из каталога `server`. В Cloudflare Workers Builds укажите:
 
-Обязательные переменные окружения:
+```text
+Root directory: server
+Deploy command: npx wrangler deploy
+```
 
-| Переменная | Назначение |
-|---|---|
-| `GOOGLE_CLIENT_ID` | тот же OAuth Client ID типа Web application, что указан в PWA |
-| `GOOGLE_CLIENT_SECRET` | OAuth Client Secret |
-| `TOKEN_ENCRYPTION_KEY` | 32 случайных байта в Base64 для AES-256-GCM |
-| `ALLOWED_ORIGINS` | разрешённые origin PWA через запятую |
+`wrangler.jsonc` уже содержит Client ID, разрешённый origin и декларативные `exports` для двух SQLite-backed Durable Object-классов.
 
-Дополнительные параметры перечислены в `server/.env.example`.
+После первого развёртывания добавьте в настройках Worker два секрета:
 
-Для Cloud Run передавайте `GOOGLE_CLIENT_SECRET` и `TOKEN_ENCRYPTION_KEY` через Secret Manager. Сервисному аккаунту нужны роли для работы с Firestore и чтения этих двух секретов. Ключ `TOKEN_ENCRYPTION_KEY` нельзя заменять после появления пользователей: без прежнего ключа сохранённые refresh token невозможно расшифровать.
+```text
+GOOGLE_CLIENT_SECRET
+TOKEN_ENCRYPTION_KEY
+```
 
-После первого подключения backend автоматически получает новые короткоживущие access token через refresh token. Повторный вход обычно требуется только после явного выхода или отзыва доступа, очистки локальной сессии, длительного бездействия либо аннулирования разрешения Google.
+`TOKEN_ENCRYPTION_KEY` — Base64-строка из 32 случайных байт. После появления пользователей этот секрет нельзя менять: старые refresh token зашифрованы прежним ключом.
+
+Полученный адрес `*.workers.dev` укажите в `web/config.js`, затем отправьте изменение в `main`.
 
 ## Управление данными
 
@@ -126,12 +133,3 @@ Android-сборка:
 ```bash
 ./gradlew assembleTimecalendarDebug assembleWarehouseDebug
 ```
-
-## Локальный запуск PWA
-
-```bash
-cd web
-python3 -m http.server 8080
-```
-
-Для локальной проверки добавьте `http://localhost:8080` одновременно в `ALLOWED_ORIGINS` backend и в Authorized JavaScript origins OAuth-клиента.

@@ -54,6 +54,8 @@ function shiftFor(date) {
 }
 
 function totalPicks(shift = {}) {
+  shift = shift || {};
+
   return [
     "cancel", "accept", "returns", "issue",
     "reject", "payment", "repack"
@@ -61,6 +63,8 @@ function totalPicks(shift = {}) {
 }
 
 function netForShift(shift = {}) {
+  shift = shift || {};
+
   const weightedPicks =
     Number(shift.cancel || 0) * 0.6 +
     Number(shift.accept || 0) * 0.8 +

@@ -1,1 +1,1 @@
-Added PWA debug overlay for JavaScript errors and load tracing.
+Fix null shift handling in Salary PWA calendar rendering.

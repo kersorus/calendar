@@ -216,3 +216,22 @@ async function readFileHandle() {
   const tx = db.transaction(STORE, "readonly");
   return requestResult(tx.objectStore(STORE).get(HANDLE_KEY));
 }
+
+
+window.LaStorage = {
+  getState: () => window.__LaState || {},
+  update: async (callback) => {
+    let state = window.__LaState || {};
+    state = callback(state) || state;
+    window.__LaState = state;
+    window.dispatchEvent(new Event("las-state-changed"));
+  },
+  exportJson: async () => {},
+  importJson: async () => {},
+  enableAutoBackup: async () => {},
+  disableAutoBackup: async () => {},
+  getAutoBackupStatus: async () => ({
+    supported:false,
+    configured:false
+  })
+};

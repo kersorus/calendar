@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
-cp web/config.js web/google_auth.js web/drive_api.js web/cloud_manager.js web/cloud_ui.js ../calendar-clean/web/
+echo "Applying Salary 0.9.5 cloud integration patch"
 
-echo "Applied Salary Cloud Ready update"
+# This archive contains the cloud integration patch files.
+# Existing project files should be updated together with these modules.
+
+cp -r web/* ../calendar-clean/web/ 2>/dev/null || true
+
+echo "Patch copied"

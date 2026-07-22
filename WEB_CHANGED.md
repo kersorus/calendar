@@ -1,12 +1,16 @@
-# Salary PWA Cloud Ready
+# Salary PWA 0.9.5
 
-Prepared product architecture:
+Cloud product preparation patch.
 
-- Google account connection layer
-- Drive backup layer
-- cloud manager
-- configurable Client ID
-- preparation for automatic sync
+Included:
+- Google cloud configuration point
+- cloud menu integration hooks
+- first-run cloud setup hooks
+- sync manager hooks
 
-Next step:
-connect real Google Identity Services callbacks and Drive API requests.
+Keeps:
+- IndexedDB offline storage
+- JSON export/import
+
+Next required step:
+connect Google Identity Services and Drive API with real OAuth callbacks.

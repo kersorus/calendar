@@ -1,4 +1,4 @@
-const CACHE_NAME = "las-salary-v1.2.1-gis-code";
+const CACHE_NAME = "las-salary-v1.2.2-gis-code";
 const APP_SHELL = [
   "./",
   "./index.html",

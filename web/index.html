@@ -1,7 +1,66 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#171719"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="La$"><title>Зарплата La$</title><link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icons/icon-192.png"><link rel="stylesheet" href="./styles.css"></head><body><div id="app" class="app-shell"><header class="topbar"><h1>Зарплата</h1><button id="menuButton" class="icon-button">☰</button></header><section class="month-nav"><button id="prevMonth" class="icon-button">‹</button><button id="monthTitle" class="month-title"></button><button id="todayButton" class="icon-button small">●</button><button id="nextMonth" class="icon-button">›</button></section><button id="scheduleButton" class="primary-button">График</button><div id="modeHint" class="mode-hint">График не выбран</div><section id="calendar" class="calendar"></section><section id="payments" class="payments"></section></div>
-<dialog id="menuDialog"><form method="dialog" class="dialog-card"><h2>Меню</h2><button id="settingsButton" type="button">Настройки</button><button id="allPaymentsButton" type="button">Все выплаты</button><button id="exportButton" type="button">Экспорт JSON</button><label class="file-button">Импорт JSON<input id="importInput" type="file" accept="application/json,.json"></label><button id="installButton" type="button" hidden>Установить приложение</button><button value="close">Закрыть</button></form></dialog>
-<dialog id="scheduleDialog"><form method="dialog" class="dialog-card"><h2>График</h2><button data-pattern="2/2" type="button">Выбрать 2/2</button><button data-pattern="3/3" type="button">Выбрать 3/3</button><button data-pattern="5/2" type="button">Выбрать 5/2</button><button id="addShiftMode" type="button">Добавить смену</button><button id="removeShiftMode" type="button">Убрать смену</button><button value="close">Закрыть</button></form></dialog>
-<dialog id="anchorDialog"><form method="dialog" class="dialog-card"><h2>Дата рабочего дня</h2><input id="anchorDate" type="date" required><button id="savePatternButton" type="button">Сохранить</button><button value="close">Отмена</button></form></dialog>
-<dialog id="shiftDialog"><form method="dialog" class="dialog-card"><h2 id="shiftDateTitle"></h2><label>Отмены ×0.6<input id="cancelCount" type="number" min="0"></label><label>Приёмка ×0.8<input id="acceptCount" type="number" min="0"></label><label>Возвраты ×0.9<input id="returnCount" type="number" min="0"></label><label>Выдача ×1.1<input id="issueCount" type="number" min="0"></label><label>Отказы ×1.1<input id="rejectCount" type="number" min="0"></label><label>Оплаты ×1.1<input id="paymentCount" type="number" min="0"></label><label>Переупаковка ×1.3<input id="repackCount" type="number" min="0"></label><div id="shiftPreview" class="preview"></div><button id="saveShiftButton" type="button">Сохранить</button><button value="close">Отмена</button></form></dialog>
-<dialog id="settingsDialog"><form method="dialog" class="dialog-card"><h2>Настройки</h2><label>Базовая цена пика<input id="basePickPrice" type="number" step="0.01"></label><label>Часов в смене<input id="shiftHours" type="number" step="0.01"></label><label>Ставка в час<input id="hourlyRate" type="number" step="0.01"></label><label>Налог, %<input id="taxPercent" type="number" step="0.01"></label><button id="saveSettingsButton" type="button">Сохранить</button><button value="close">Отмена</button></form></dialog>
-<dialog id="paymentsDialog"><form method="dialog" class="dialog-card large"><h2>Все выплаты</h2><div id="paymentsList"></div><button value="close">Закрыть</button></form></dialog><script src="./app.js" type="module"></script></body></html>
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#171719">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="La$">
+  <title>Зарплата La$</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div class="app-shell">
+<header class="topbar"><h1>Зарплата</h1><button id="menuButton" class="icon-button">☰</button></header>
+<section class="month-nav"><button id="prevMonth" class="icon-button">‹</button><button id="monthTitle" class="month-title"></button><button id="todayButton" class="icon-button small">●</button><button id="nextMonth" class="icon-button">›</button></section>
+<button id="scheduleButton" class="primary-button">График</button>
+<div id="modeHint" class="mode-hint"></div>
+<section id="calendar" class="calendar"></section>
+<section id="payments" class="payments"></section>
+</div>
+
+<dialog id="menuDialog"><form method="dialog" class="dialog-card">
+<h2>Меню</h2>
+<button id="settingsButton" type="button">Настройки</button>
+<button id="allPaymentsButton" type="button">Все выплаты</button>
+<button id="exportButton" type="button">Экспорт JSON</button>
+<label class="file-button">Импорт JSON<input id="importInput" type="file" accept=".json,application/json"></label>
+<div id="storageStatus" class="storage-status"></div>
+<button id="enableAutoBackupButton" type="button">Включить автосохранение в файл</button>
+<button id="disableAutoBackupButton" type="button" hidden>Отключить автосохранение</button>
+<button value="close">Закрыть</button>
+</form></dialog>
+
+<dialog id="scheduleDialog"><form method="dialog" class="dialog-card">
+<h2>График</h2><button data-pattern="2/2" type="button">2/2</button><button data-pattern="3/3" type="button">3/3</button><button data-pattern="5/2" type="button">5/2</button>
+<button id="addShiftMode" type="button">Добавить смену</button><button id="removeShiftMode" type="button">Убрать смену</button><button value="close">Закрыть</button>
+</form></dialog>
+
+<dialog id="anchorDialog"><form method="dialog" class="dialog-card"><h2>Дата рабочего дня</h2><input id="anchorDate" type="date"><button id="savePatternButton" type="button">Сохранить</button><button value="close">Отмена</button></form></dialog>
+
+<dialog id="shiftDialog"><form method="dialog" class="dialog-card">
+<h2 id="shiftDateTitle"></h2>
+<label>Отмены ×0.6<input id="cancelCount" type="number" min="0"></label>
+<label>Приёмка ×0.8<input id="acceptCount" type="number" min="0"></label>
+<label>Возвраты ×0.9<input id="returnCount" type="number" min="0"></label>
+<label>Выдача ×1.1<input id="issueCount" type="number" min="0"></label>
+<label>Отказы ×1.1<input id="rejectCount" type="number" min="0"></label>
+<label>Оплаты ×1.1<input id="paymentCount" type="number" min="0"></label>
+<label>Переупаковка ×1.3<input id="repackCount" type="number" min="0"></label>
+<div id="shiftPreview" class="preview"></div><button id="saveShiftButton" type="button">Сохранить</button><button value="close">Отмена</button>
+</form></dialog>
+
+<dialog id="settingsDialog"><form method="dialog" class="dialog-card">
+<h2>Настройки</h2>
+<label>Базовая цена пика<input id="basePickPrice" type="number" step=".01"></label>
+<label>Часов в смене<input id="shiftHours" type="number" step=".01"></label>
+<label>Ставка в час<input id="hourlyRate" type="number" step=".01"></label>
+<label>Налог, %<input id="taxPercent" type="number" step=".01"></label>
+<button id="saveSettingsButton" type="button">Сохранить</button><button value="close">Отмена</button>
+</form></dialog>
+
+<dialog id="paymentsDialog"><form method="dialog" class="dialog-card large"><h2>Все выплаты</h2><div id="paymentsList"></div><button value="close">Закрыть</button></form></dialog>
+<script type="module" src="./app.js"></script>
+</body></html>

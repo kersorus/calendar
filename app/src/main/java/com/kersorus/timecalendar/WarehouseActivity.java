@@ -3,208 +3,489 @@ package com.kersorus.timecalendar;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
+import android.provider.Settings;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.Window;
 import android.widget.Button;
 import android.widget.DatePicker;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.GridLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.TextView;
-import android.text.InputType;
+import android.widget.Toast;
 
-import java.text.SimpleDateFormat;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
+import java.time.format.TextStyle;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Calendar;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
 public class WarehouseActivity extends Activity {
     private static final String PREFS = "warehouse_settings";
+
     private static final String KEY_PATTERN = "pattern";
     private static final String KEY_ANCHOR = "anchor";
+    private static final String KEY_BACKGROUND_URI = "background_uri";
+    private static final String KEY_BASE_PICK_PRICE = "base_pick_price";
+    private static final String KEY_SHIFT_HOURS = "shift_hours";
+    private static final String KEY_HOURLY_RATE = "hourly_rate";
+    private static final String KEY_TAX_PERCENT = "tax_percent";
 
     private static final int MODE_NORMAL = 0;
     private static final int MODE_ADD_SHIFT = 1;
     private static final int MODE_REMOVE_SHIFT = 2;
 
-    private final SimpleDateFormat keyFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-    private final SimpleDateFormat titleFormat = new SimpleDateFormat("LLLL yyyy", new Locale("ru"));
-    private final SimpleDateFormat humanFormat = new SimpleDateFormat("dd.MM.yyyy", Locale.getDefault());
+    private static final int REQUEST_BACKGROUND = 2001;
+    private static final int REQUEST_BACKUP = 2002;
+    private static final int REQUEST_RESTORE = 2003;
 
-    private WarehouseDatabaseHelper db;
+    private static final DateTimeFormatter KEY_FORMAT = DateTimeFormatter.ISO_LOCAL_DATE;
+    private static final DateTimeFormatter HUMAN_FORMAT =
+            DateTimeFormatter.ofPattern("d MMMM yyyy", new Locale("ru"));
+
+    private static final int COLOR_BLUE = Color.rgb(66, 112, 168);
+    private static final int COLOR_ORANGE = Color.rgb(205, 105, 55);
+    private static final int COLOR_GREEN_PERIOD = Color.rgb(76, 140, 84);
+    private static final int COLOR_PURPLE = Color.rgb(127, 86, 150);
+    private static final int COLOR_GOOD = Color.rgb(27, 125, 64);
+
     private SharedPreferences prefs;
+    private WarehouseDatabaseHelper db;
 
-    private LinearLayout root;
+    private YearMonth visibleMonth = YearMonth.now();
+    private int editMode = MODE_NORMAL;
+
+    private FrameLayout outerRoot;
+    private ImageView backgroundImage;
+    private LinearLayout contentRoot;
     private TextView titleText;
     private TextView modeText;
     private GridLayout calendarGrid;
-    private TextView paymentsText;
+    private LinearLayout paymentsContainer;
 
-    private Calendar visibleMonth;
-    private int editMode = MODE_NORMAL;
-    private float touchStartX;
-    private float touchStartY;
+    private float touchDownX;
+    private float touchDownY;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        db = new WarehouseDatabaseHelper(this);
+
+        Window window = getWindow();
+        window.setStatusBarColor(Color.rgb(248, 248, 248));
+        window.setNavigationBarColor(Color.rgb(248, 248, 248));
+        window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        visibleMonth = Calendar.getInstance();
-        visibleMonth.set(Calendar.DAY_OF_MONTH, 1);
+        db = new WarehouseDatabaseHelper(this);
+
         buildUi();
+        loadBackground();
         refreshAll();
     }
 
     private void buildUi() {
-        root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(14), dp(30), dp(14), dp(8));
-        root.setBackgroundColor(Color.rgb(250, 250, 250));
-        setContentView(root);
+        outerRoot = new FrameLayout(this);
+        outerRoot.setFitsSystemWindows(true);
 
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        root.addView(header, new LinearLayout.LayoutParams(-1, dp(46)));
+        backgroundImage = new ImageView(this);
+        backgroundImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        backgroundImage.setVisibility(View.GONE);
+        outerRoot.addView(backgroundImage, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+
+        contentRoot = new LinearLayout(this);
+        contentRoot.setOrientation(LinearLayout.VERTICAL);
+        contentRoot.setPadding(dp(10), dp(8), dp(10), dp(8));
+        contentRoot.setBackgroundColor(Color.argb(224, 250, 250, 250));
+        outerRoot.addView(contentRoot, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        contentRoot.addView(top, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(44)
+        ));
 
         TextView appTitle = new TextView(this);
-        appTitle.setText("Склад Зарплата");
+        appTitle.setText("Зарплата");
         appTitle.setTextSize(24);
         appTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        header.addView(appTitle, new LinearLayout.LayoutParams(0, -1, 1));
+        appTitle.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(appTitle, new LinearLayout.LayoutParams(0, -1, 1));
 
-        Button menuButton = compactButton("☰");
-        menuButton.setOnClickListener(this::showMainMenu);
-        header.addView(menuButton, new LinearLayout.LayoutParams(dp(52), dp(42)));
+        Button menu = compactButton("☰");
+        menu.setContentDescription("Меню");
+        menu.setOnClickListener(this::showMainMenu);
+        top.addView(menu, new LinearLayout.LayoutParams(dp(48), dp(42)));
 
-        LinearLayout nav = new LinearLayout(this);
-        nav.setOrientation(LinearLayout.HORIZONTAL);
-        nav.setGravity(Gravity.CENTER_VERTICAL);
-        root.addView(nav, new LinearLayout.LayoutParams(-1, dp(46)));
+        LinearLayout navigation = new LinearLayout(this);
+        navigation.setOrientation(LinearLayout.HORIZONTAL);
+        navigation.setGravity(Gravity.CENTER);
+        contentRoot.addView(navigation, new LinearLayout.LayoutParams(-1, dp(42)));
 
-        Button prev = compactButton("‹");
-        prev.setOnClickListener(v -> moveMonth(-1));
-        nav.addView(prev, new LinearLayout.LayoutParams(dp(44), dp(40)));
+        Button previous = compactButton("‹");
+        previous.setOnClickListener(v -> moveMonth(-1));
+        navigation.addView(previous, new LinearLayout.LayoutParams(dp(44), -1));
 
         titleText = new TextView(this);
         titleText.setGravity(Gravity.CENTER);
         titleText.setTypeface(Typeface.DEFAULT_BOLD);
         titleText.setTextSize(18);
         titleText.setOnClickListener(v -> pickCalendarMonth());
-        nav.addView(titleText, new LinearLayout.LayoutParams(0, -1, 1));
+        navigation.addView(titleText, new LinearLayout.LayoutParams(0, -1, 1));
 
         Button today = compactButton("●");
-        today.setOnClickListener(v -> goToday());
-        nav.addView(today, new LinearLayout.LayoutParams(dp(44), dp(40)));
+        today.setContentDescription("Сегодня");
+        today.setOnClickListener(v -> {
+            visibleMonth = YearMonth.now();
+            refreshAll();
+        });
+        navigation.addView(today, new LinearLayout.LayoutParams(dp(44), -1));
 
         Button next = compactButton("›");
         next.setOnClickListener(v -> moveMonth(1));
-        nav.addView(next, new LinearLayout.LayoutParams(dp(44), dp(40)));
+        navigation.addView(next, new LinearLayout.LayoutParams(dp(44), -1));
 
         Button schedule = new Button(this);
         schedule.setText("График");
         schedule.setAllCaps(false);
         schedule.setOnClickListener(this::showScheduleMenu);
-        root.addView(schedule, new LinearLayout.LayoutParams(-1, dp(44)));
+        contentRoot.addView(schedule, new LinearLayout.LayoutParams(-1, dp(44)));
 
         modeText = new TextView(this);
         modeText.setGravity(Gravity.CENTER);
-        modeText.setTextSize(14);
-        root.addView(modeText, new LinearLayout.LayoutParams(-1, dp(26)));
+        modeText.setTextSize(13);
+        contentRoot.addView(modeText, new LinearLayout.LayoutParams(-1, dp(24)));
 
         calendarGrid = new GridLayout(this);
         calendarGrid.setColumnCount(7);
         calendarGrid.setPadding(0, 0, 0, 0);
-        calendarGrid.setOnTouchListener((v, event) -> handleCalendarTouch(event));
-        root.addView(calendarGrid, new LinearLayout.LayoutParams(-1, 0, 1));
+        calendarGrid.setOnTouchListener((view, event) -> handleCalendarTouch(event));
+        contentRoot.addView(calendarGrid, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        paymentsText = new TextView(this);
-        paymentsText.setTextSize(14);
-        paymentsText.setPadding(dp(8), dp(6), dp(8), dp(6));
-        paymentsText.setBackgroundColor(Color.rgb(238, 238, 238));
-        paymentsText.setOnClickListener(v -> showPaymentsList());
-        root.addView(paymentsText, new LinearLayout.LayoutParams(-1, dp(104)));
+        paymentsContainer = new LinearLayout(this);
+        paymentsContainer.setOrientation(LinearLayout.HORIZONTAL);
+        paymentsContainer.setPadding(0, dp(4), 0, 0);
+        contentRoot.addView(paymentsContainer, new LinearLayout.LayoutParams(-1, dp(112)));
+
+        setContentView(outerRoot);
     }
 
     private Button compactButton(String text) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setTextSize(20);
-        b.setAllCaps(false);
-        b.setPadding(0, 0, 0, 0);
-        return b;
-    }
-
-    private boolean handleCalendarTouch(MotionEvent event) {
-        switch (event.getAction()) {
-            case MotionEvent.ACTION_DOWN:
-                touchStartX = event.getX();
-                touchStartY = event.getY();
-                return true;
-            case MotionEvent.ACTION_UP:
-                float dx = event.getX() - touchStartX;
-                float dy = event.getY() - touchStartY;
-                if (Math.abs(dx) > dp(70) && Math.abs(dx) > Math.abs(dy) * 1.4f) {
-                    moveMonth(dx < 0 ? 1 : -1);
-                    return true;
-                }
-                return false;
-            default:
-                return true;
-        }
+        Button button = new Button(this);
+        button.setText(text);
+        button.setTextSize(20);
+        button.setAllCaps(false);
+        button.setPadding(0, 0, 0, 0);
+        return button;
     }
 
     private void showMainMenu(View anchor) {
-        PopupMenu menu = new PopupMenu(this, anchor);
-        menu.getMenu().add("Все выплаты");
-        menu.getMenu().add("Настройки");
-        menu.setOnMenuItemClickListener(item -> {
+        PopupMenu popup = new PopupMenu(this, anchor);
+        popup.getMenu().add("Настройки");
+        popup.getMenu().add("Все выплаты");
+        popup.getMenu().add("Сохранить резервную копию");
+        popup.getMenu().add("Восстановить резервную копию");
+
+        popup.setOnMenuItemClickListener(item -> {
             String title = item.getTitle().toString();
-            if (title.equals("Все выплаты")) {
+            if ("Настройки".equals(title)) {
+                showSettings();
+            } else if ("Все выплаты".equals(title)) {
                 showPaymentsList();
-            } else {
-                new AlertDialog.Builder(this)
-                        .setTitle("Настройки")
-                        .setMessage("Пока пусто.")
-                        .setPositiveButton("OK", null)
-                        .show();
+            } else if ("Сохранить резервную копию".equals(title)) {
+                createBackup();
+            } else if ("Восстановить резервную копию".equals(title)) {
+                restoreBackup();
             }
             return true;
         });
-        menu.show();
+        popup.show();
+    }
+
+    private void showSettings() {
+        String[] options = {
+                "Фоновая фотография",
+                "Убрать фон",
+                "Параметры расчёта"
+        };
+
+        new AlertDialog.Builder(this)
+                .setTitle("Настройки")
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) {
+                        chooseBackground();
+                    } else if (which == 1) {
+                        prefs.edit().remove(KEY_BACKGROUND_URI).apply();
+                        loadBackground();
+                    } else {
+                        showCalculationSettings();
+                    }
+                })
+                .setNegativeButton("Закрыть", null)
+                .show();
+    }
+
+    private void showCalculationSettings() {
+        LinearLayout box = verticalDialogBox();
+
+        EditText basePrice = decimalInput(
+                getBasePickPrice(),
+                "Базовая стоимость пика, ₽"
+        );
+        EditText shiftHours = decimalInput(
+                getShiftHours(),
+                "Часов в смене"
+        );
+        EditText hourlyRate = decimalInput(
+                getHourlyRate(),
+                "Ставка в час, ₽"
+        );
+        EditText tax = decimalInput(
+                getTaxPercent(),
+                "Налог, %"
+        );
+
+        box.addView(labeledInput("Базовая стоимость пика", basePrice));
+        box.addView(labeledInput("Оплачиваемые часы смены", shiftHours));
+        box.addView(labeledInput("Почасовая ставка", hourlyRate));
+        box.addView(labeledInput("Налог", tax));
+
+        new AlertDialog.Builder(this)
+                .setTitle("Параметры расчёта")
+                .setView(box)
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Сохранить", (dialog, which) -> {
+                    prefs.edit()
+                            .putFloat(KEY_BASE_PICK_PRICE, (float) parseDouble(basePrice, 6.1))
+                            .putFloat(KEY_SHIFT_HOURS, (float) parseDouble(shiftHours, 10.75))
+                            .putFloat(KEY_HOURLY_RATE, (float) parseDouble(hourlyRate, 147.0))
+                            .putFloat(KEY_TAX_PERCENT, (float) parseDouble(tax, 13.0))
+                            .apply();
+                    refreshAll();
+                })
+                .show();
+    }
+
+    private LinearLayout labeledInput(String label, EditText input) {
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setPadding(0, dp(4), 0, dp(4));
+
+        TextView text = new TextView(this);
+        text.setText(label);
+        text.setTextSize(13);
+        container.addView(text);
+        container.addView(input);
+        return container;
+    }
+
+    private void chooseBackground() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.setType("image/*");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(intent, REQUEST_BACKGROUND);
+    }
+
+    private void loadBackground() {
+        String uriText = prefs.getString(KEY_BACKGROUND_URI, "");
+        if (uriText == null || uriText.isEmpty()) {
+            backgroundImage.setImageDrawable(null);
+            backgroundImage.setVisibility(View.GONE);
+            contentRoot.setBackgroundColor(Color.rgb(250, 250, 250));
+            return;
+        }
+
+        try {
+            backgroundImage.setImageURI(Uri.parse(uriText));
+            backgroundImage.setVisibility(View.VISIBLE);
+            contentRoot.setBackgroundColor(Color.argb(218, 250, 250, 250));
+        } catch (Exception error) {
+            prefs.edit().remove(KEY_BACKGROUND_URI).apply();
+            backgroundImage.setVisibility(View.GONE);
+            contentRoot.setBackgroundColor(Color.rgb(250, 250, 250));
+        }
+    }
+
+    private void createBackup() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.setType("application/octet-stream");
+        intent.putExtra(Intent.EXTRA_TITLE, "salary-backup.db");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(intent, REQUEST_BACKUP);
+    }
+
+    private void restoreBackup() {
+        new AlertDialog.Builder(this)
+                .setTitle("Восстановление")
+                .setMessage("Текущие данные будут заменены выбранной резервной копией.")
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Продолжить", (dialog, which) -> {
+                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    intent.setType("*/*");
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    startActivityForResult(intent, REQUEST_RESTORE);
+                })
+                .show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+
+        Uri uri = data.getData();
+
+        if (requestCode == REQUEST_BACKGROUND) {
+            try {
+                getContentResolver().takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                );
+            } catch (Exception ignored) {
+            }
+            prefs.edit().putString(KEY_BACKGROUND_URI, uri.toString()).apply();
+            loadBackground();
+            return;
+        }
+
+        if (requestCode == REQUEST_BACKUP) {
+            try {
+                db.close();
+                File source = getDatabasePath(WarehouseDatabaseHelper.DB_NAME);
+                copyFileToUri(source, uri);
+                db = new WarehouseDatabaseHelper(this);
+                Toast.makeText(this, "Резервная копия сохранена", Toast.LENGTH_SHORT).show();
+            } catch (Exception error) {
+                db = new WarehouseDatabaseHelper(this);
+                showError("Не удалось сохранить резервную копию", error);
+            }
+            return;
+        }
+
+        if (requestCode == REQUEST_RESTORE) {
+            try {
+                db.close();
+                File destination = getDatabasePath(WarehouseDatabaseHelper.DB_NAME);
+                copyUriToFile(uri, destination);
+                db = new WarehouseDatabaseHelper(this);
+                refreshAll();
+                Toast.makeText(this, "Данные восстановлены", Toast.LENGTH_SHORT).show();
+            } catch (Exception error) {
+                db = new WarehouseDatabaseHelper(this);
+                showError("Не удалось восстановить данные", error);
+            }
+        }
+    }
+
+    private void copyFileToUri(File source, Uri destination) throws Exception {
+        try (InputStream input = new FileInputStream(source);
+             OutputStream output = getContentResolver().openOutputStream(destination, "w")) {
+            if (output == null) {
+                throw new IllegalStateException("Не удалось открыть файл назначения");
+            }
+            copy(input, output);
+        }
+    }
+
+    private void copyUriToFile(Uri source, File destination) throws Exception {
+        File parent = destination.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            throw new IllegalStateException("Не удалось создать каталог базы");
+        }
+
+        File temporary = new File(destination.getAbsolutePath() + ".restore");
+        try (InputStream input = getContentResolver().openInputStream(source);
+             OutputStream output = new FileOutputStream(temporary)) {
+            if (input == null) {
+                throw new IllegalStateException("Не удалось открыть резервную копию");
+            }
+            copy(input, output);
+        }
+
+        if (destination.exists() && !destination.delete()) {
+            throw new IllegalStateException("Не удалось заменить текущую базу");
+        }
+        if (!temporary.renameTo(destination)) {
+            throw new IllegalStateException("Не удалось применить резервную копию");
+        }
+    }
+
+    private void copy(InputStream input, OutputStream output) throws Exception {
+        byte[] buffer = new byte[8192];
+        int read;
+        while ((read = input.read(buffer)) >= 0) {
+            output.write(buffer, 0, read);
+        }
+        output.flush();
+    }
+
+    private void showError(String title, Exception error) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(error.getMessage() == null ? error.toString() : error.getMessage())
+                .setPositiveButton("OK", null)
+                .show();
     }
 
     private void showScheduleMenu(View anchor) {
-        PopupMenu menu = new PopupMenu(this, anchor);
-        menu.getMenu().add("Выбрать график");
-        menu.getMenu().add("Добавить смену");
-        menu.getMenu().add("Убрать смену");
-        menu.setOnMenuItemClickListener(item -> {
+        PopupMenu popup = new PopupMenu(this, anchor);
+        popup.getMenu().add("Выбрать график");
+        popup.getMenu().add("Добавить смену");
+        popup.getMenu().add("Убрать смену");
+
+        popup.setOnMenuItemClickListener(item -> {
             String title = item.getTitle().toString();
-            if (title.equals("Выбрать график")) {
-                chooseSchedulePattern();
-            } else if (title.equals("Добавить смену")) {
+            if ("Выбрать график".equals(title)) {
+                choosePattern();
+            } else if ("Добавить смену".equals(title)) {
                 editMode = MODE_ADD_SHIFT;
-                refreshAll();
-            } else if (title.equals("Убрать смену")) {
+                updateModeText();
+            } else if ("Убрать смену".equals(title)) {
                 editMode = MODE_REMOVE_SHIFT;
-                refreshAll();
+                updateModeText();
             }
             return true;
         });
-        menu.show();
+        popup.show();
     }
 
-    private void chooseSchedulePattern() {
-        String[] patterns = new String[]{"2/2", "3/3", "5/2"};
+    private void choosePattern() {
+        String[] patterns = {"2/2", "3/3", "5/2"};
+
         new AlertDialog.Builder(this)
                 .setTitle("Выберите график")
                 .setItems(patterns, (dialog, which) -> pickAnchorDate(patterns[which]))
@@ -212,400 +493,580 @@ public class WarehouseActivity extends Activity {
     }
 
     private void pickAnchorDate(String pattern) {
-        Calendar now = Calendar.getInstance();
-        DatePickerDialog d = new DatePickerDialog(
+        LocalDate now = LocalDate.now();
+        DatePickerDialog dialog = new DatePickerDialog(
                 this,
-                (DatePicker view, int year, int month, int dayOfMonth) -> {
-                    Calendar c = Calendar.getInstance();
-                    c.set(year, month, dayOfMonth, 0, 0, 0);
-                    c.set(Calendar.MILLISECOND, 0);
+                (DatePicker view, int year, int month, int day) -> {
+                    LocalDate anchor = LocalDate.of(year, month + 1, day);
                     prefs.edit()
                             .putString(KEY_PATTERN, pattern)
-                            .putString(KEY_ANCHOR, keyFormat.format(c.getTime()))
+                            .putString(KEY_ANCHOR, anchor.format(KEY_FORMAT))
                             .apply();
-                    applyScheduleForVisibleMonth();
+                    editMode = MODE_NORMAL;
                     refreshAll();
                 },
-                now.get(Calendar.YEAR),
-                now.get(Calendar.MONTH),
-                now.get(Calendar.DAY_OF_MONTH)
+                now.getYear(),
+                now.getMonthValue() - 1,
+                now.getDayOfMonth()
         );
-        d.setTitle("Дата любого рабочего дня");
-        d.show();
+        dialog.setTitle("Дата любого рабочего дня");
+        dialog.show();
     }
 
     private void pickCalendarMonth() {
-        DatePickerDialog d = new DatePickerDialog(
+        LocalDate date = visibleMonth.atDay(1);
+        DatePickerDialog dialog = new DatePickerDialog(
                 this,
-                (view, year, month, dayOfMonth) -> {
-                    visibleMonth.set(Calendar.YEAR, year);
-                    visibleMonth.set(Calendar.MONTH, month);
-                    visibleMonth.set(Calendar.DAY_OF_MONTH, 1);
+                (view, year, month, day) -> {
+                    visibleMonth = YearMonth.of(year, month + 1);
                     refreshAll();
                 },
-                visibleMonth.get(Calendar.YEAR),
-                visibleMonth.get(Calendar.MONTH),
-                visibleMonth.get(Calendar.DAY_OF_MONTH)
+                date.getYear(),
+                date.getMonthValue() - 1,
+                1
         );
-        d.setTitle("Перейти к месяцу");
-        d.show();
+        dialog.setTitle("Перейти к месяцу");
+        dialog.show();
     }
 
-    private void applyScheduleForVisibleMonth() {
-        String pattern = prefs.getString(KEY_PATTERN, "");
-        String anchorText = prefs.getString(KEY_ANCHOR, "");
-        if (pattern.length() == 0 || anchorText.length() == 0) {
-            return;
+    private boolean handleCalendarTouch(MotionEvent event) {
+        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            touchDownX = event.getX();
+            touchDownY = event.getY();
+            return true;
         }
-        Calendar start = (Calendar) visibleMonth.clone();
-        start.set(Calendar.DAY_OF_MONTH, 1);
-        Calendar end = (Calendar) start.clone();
-        end.set(Calendar.DAY_OF_MONTH, end.getActualMaximum(Calendar.DAY_OF_MONTH));
-        Calendar cursor = (Calendar) start.clone();
-        while (!cursor.after(end)) {
-            if (isScheduledWorkday(cursor, pattern, anchorText)) {
-                db.setWorkday(keyFormat.format(cursor.getTime()), true);
+
+        if (event.getAction() == MotionEvent.ACTION_UP) {
+            float deltaX = event.getX() - touchDownX;
+            float deltaY = event.getY() - touchDownY;
+
+            if (Math.abs(deltaX) > dp(55) && Math.abs(deltaX) > Math.abs(deltaY)) {
+                moveMonth(deltaX < 0 ? 1 : -1);
+                return true;
             }
-            cursor.add(Calendar.DAY_OF_MONTH, 1);
         }
+        return true;
     }
 
-    private boolean isScheduledWorkday(Calendar date, String pattern, String anchorText) {
-        try {
-            Calendar anchor = Calendar.getInstance();
-            anchor.setTime(keyFormat.parse(anchorText));
-            long days = daysBetween(anchor, date);
-            if (pattern.equals("5/2")) {
-                int dow = date.get(Calendar.DAY_OF_WEEK);
-                return dow != Calendar.SATURDAY && dow != Calendar.SUNDAY;
-            }
-            int work = pattern.equals("3/3") ? 3 : 2;
-            int rest = pattern.equals("3/3") ? 3 : 2;
-            int cycle = work + rest;
-            long mod = ((days % cycle) + cycle) % cycle;
-            return mod < work;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private long daysBetween(Calendar a, Calendar b) {
-        Calendar ca = (Calendar) a.clone();
-        Calendar cb = (Calendar) b.clone();
-        ca.set(Calendar.HOUR_OF_DAY, 0); ca.set(Calendar.MINUTE, 0); ca.set(Calendar.SECOND, 0); ca.set(Calendar.MILLISECOND, 0);
-        cb.set(Calendar.HOUR_OF_DAY, 0); cb.set(Calendar.MINUTE, 0); cb.set(Calendar.SECOND, 0); cb.set(Calendar.MILLISECOND, 0);
-        return (cb.getTimeInMillis() - ca.getTimeInMillis()) / 86400000L;
+    private void moveMonth(int delta) {
+        visibleMonth = visibleMonth.plusMonths(delta);
+        refreshAll();
     }
 
     private void refreshAll() {
-        titleText.setText(capitalize(titleFormat.format(visibleMonth.getTime())));
-        if (editMode == MODE_ADD_SHIFT) {
-            modeText.setText("Режим: нажмите дату, чтобы добавить смену");
-            calendarGrid.setBackgroundColor(Color.rgb(120, 170, 220));
-            calendarGrid.setPadding(dp(2), dp(2), dp(2), dp(2));
-        } else if (editMode == MODE_REMOVE_SHIFT) {
-            modeText.setText("Режим: нажмите дату, чтобы убрать смену");
-            calendarGrid.setBackgroundColor(Color.rgb(220, 150, 150));
-            calendarGrid.setPadding(dp(2), dp(2), dp(2), dp(2));
-        } else {
-            modeText.setText("Нажмите дату смены, чтобы внести пики");
-            calendarGrid.setBackgroundColor(Color.TRANSPARENT);
-            calendarGrid.setPadding(0, 0, 0, 0);
-        }
+        String monthName = visibleMonth.getMonth()
+                .getDisplayName(TextStyle.FULL_STANDALONE, new Locale("ru"));
+        titleText.setText(capitalize(monthName) + " " + visibleMonth.getYear());
+        updateModeText();
         renderCalendar();
         renderPaymentsSummary();
     }
 
+    private void updateModeText() {
+        if (editMode == MODE_ADD_SHIFT) {
+            modeText.setText("Нажмите дату, чтобы добавить смену");
+            modeText.setTextColor(COLOR_GREEN_PERIOD);
+        } else if (editMode == MODE_REMOVE_SHIFT) {
+            modeText.setText("Нажмите дату, чтобы убрать смену");
+            modeText.setTextColor(Color.rgb(175, 45, 45));
+        } else {
+            String pattern = prefs.getString(KEY_PATTERN, "");
+            if (pattern == null || pattern.isEmpty()) {
+                modeText.setText("График не выбран");
+            } else {
+                modeText.setText("График " + pattern);
+            }
+            modeText.setTextColor(Color.DKGRAY);
+        }
+    }
+
     private void renderCalendar() {
         calendarGrid.removeAllViews();
+
         String[] week = {"Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"};
-        for (String w : week) {
-            TextView tv = cellText(w, true);
-            calendarGrid.addView(tv, cellParams());
+        for (String name : week) {
+            TextView header = new TextView(this);
+            header.setText(name);
+            header.setGravity(Gravity.CENTER);
+            header.setTypeface(Typeface.DEFAULT_BOLD);
+            header.setTextSize(12);
+            calendarGrid.addView(header, cellParams());
         }
 
-        Calendar first = (Calendar) visibleMonth.clone();
-        first.set(Calendar.DAY_OF_MONTH, 1);
-        int firstDay = first.get(Calendar.DAY_OF_WEEK);
-        int offset = firstDay == Calendar.SUNDAY ? 6 : firstDay - Calendar.MONDAY;
-        int daysInMonth = first.getActualMaximum(Calendar.DAY_OF_MONTH);
-        int totalCells = 42;
+        LocalDate first = visibleMonth.atDay(1);
+        int offset = first.getDayOfWeek().getValue() - 1;
+        int daysInMonth = visibleMonth.lengthOfMonth();
 
-        for (int i = 0; i < totalCells; i++) {
-            int day = i - offset + 1;
+        for (int index = 0; index < 42; index++) {
+            int day = index - offset + 1;
             TextView cell = new TextView(this);
             cell.setGravity(Gravity.CENTER);
             cell.setTextSize(11);
-            cell.setPadding(1, 1, 1, 1);
-            cell.setBackgroundColor(Color.rgb(245, 245, 245));
+            cell.setPadding(dp(1), dp(1), dp(1), dp(1));
 
-            if (day >= 1 && day <= daysInMonth) {
-                Calendar date = (Calendar) visibleMonth.clone();
-                date.set(Calendar.DAY_OF_MONTH, day);
-                String key = keyFormat.format(date.getTime());
-                WarehouseDatabaseHelper.Shift shift = db.getShift(key);
-                boolean isWorkday = shift != null && shift.isWorkday;
-                double net = shift == null ? 0.0 : shift.net();
-                cell.setText(day + (net > 0.0 ? "\n" + Math.round(net) + "₽" : ""));
-                cell.setTextColor(Color.rgb(40, 40, 40));
-                if (isWorkday) {
-                    cell.setBackgroundColor(colorForPayPeriod(date));
-                }
-                if (net >= 5000.0) {
-                    cell.setBackgroundColor(Color.rgb(180, 230, 185));
-                    cell.setTypeface(Typeface.DEFAULT_BOLD);
-                }
-                Calendar today = Calendar.getInstance();
-                if (sameDay(today, date)) {
-                    cell.setTypeface(Typeface.DEFAULT_BOLD);
-                    cell.setText("•" + cell.getText());
-                }
-                cell.setOnClickListener(v -> onDateClick(key, date));
-            } else {
+            if (day < 1 || day > daysInMonth) {
                 cell.setText("");
                 cell.setBackgroundColor(Color.TRANSPARENT);
+                calendarGrid.addView(cell, cellParams());
+                continue;
             }
+
+            LocalDate date = visibleMonth.atDay(day);
+            String key = date.format(KEY_FORMAT);
+            WarehouseDatabaseHelper.Shift shift = db.getShift(key);
+            double net = shift == null ? 0.0 : netForShift(shift);
+            boolean workday = isEffectiveWorkday(date, shift);
+
+            cell.setText(day + (net > 0.0 ? "\n" + Math.round(net) + "₽" : ""));
+            cell.setTextColor(Color.WHITE);
+
+            int color = workday ? colorForPayPeriod(date) : Color.rgb(218, 218, 218);
+            if (!workday) {
+                cell.setTextColor(Color.rgb(55, 55, 55));
+            }
+
+            if (net >= 5000.0) {
+                color = COLOR_GOOD;
+                cell.setTypeface(Typeface.DEFAULT_BOLD);
+                cell.setTextColor(Color.WHITE);
+            }
+
+            GradientDrawable background = roundedBackground(color, dp(1), Color.WHITE, dp(5));
+            if (date.equals(LocalDate.now())) {
+                background.setStroke(dp(2), Color.rgb(25, 25, 25));
+                cell.setTypeface(Typeface.DEFAULT_BOLD);
+            }
+            cell.setBackground(background);
+            cell.setOnClickListener(v -> onDateClick(date));
+
             calendarGrid.addView(cell, cellParams());
         }
     }
 
-    private TextView cellText(String text, boolean bold) {
-        TextView tv = new TextView(this);
-        tv.setText(text);
-        tv.setGravity(Gravity.CENTER);
-        tv.setTextSize(12);
-        if (bold) tv.setTypeface(Typeface.DEFAULT_BOLD);
-        return tv;
-    }
-
     private GridLayout.LayoutParams cellParams() {
-        GridLayout.LayoutParams p = new GridLayout.LayoutParams();
-        p.width = 0;
-        p.height = 0;
-        p.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
-        p.rowSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
-        p.setMargins(1, 1, 1, 1);
-        return p;
+        GridLayout.LayoutParams params = new GridLayout.LayoutParams();
+        params.width = 0;
+        params.height = 0;
+        params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
+        params.rowSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
+        params.setMargins(dp(1), dp(1), dp(1), dp(1));
+        return params;
     }
 
-    private int colorForPayPeriod(Calendar date) {
-        int month = date.get(Calendar.MONTH);
-        int day = date.get(Calendar.DAY_OF_MONTH);
-        boolean firstHalf = day <= 15;
-        if (month % 2 == 0) {
-            return firstHalf ? Color.rgb(225, 235, 255) : Color.rgb(255, 235, 215);
+    private boolean isEffectiveWorkday(
+            LocalDate date,
+            WarehouseDatabaseHelper.Shift shift
+    ) {
+        if (shift != null) {
+            if (shift.workdayOverride == 1) {
+                return true;
+            }
+            if (shift.workdayOverride == 0) {
+                return false;
+            }
+            if (shift.totalPicks() > 0) {
+                return true;
+            }
+        }
+        return isScheduledWorkday(date);
+    }
+
+    private boolean isScheduledWorkday(LocalDate date) {
+        String pattern = prefs.getString(KEY_PATTERN, "");
+        String anchorText = prefs.getString(KEY_ANCHOR, "");
+
+        if (pattern == null || pattern.isEmpty()
+                || anchorText == null || anchorText.isEmpty()) {
+            return false;
+        }
+
+        LocalDate anchor;
+        try {
+            anchor = LocalDate.parse(anchorText, KEY_FORMAT);
+        } catch (Exception error) {
+            return false;
+        }
+
+        long difference = ChronoUnit.DAYS.between(anchor, date);
+
+        if ("5/2".equals(pattern)) {
+            long cycle = Math.floorMod(difference, 7);
+            return cycle < 5;
+        }
+
+        int work;
+        int rest;
+        if ("2/2".equals(pattern)) {
+            work = 2;
+            rest = 2;
+        } else if ("3/3".equals(pattern)) {
+            work = 3;
+            rest = 3;
         } else {
-            return firstHalf ? Color.rgb(235, 250, 225) : Color.rgb(245, 225, 255);
+            return false;
         }
+
+        long cycle = Math.floorMod(difference, work + rest);
+        return cycle < work;
     }
 
-    private void onDateClick(String key, Calendar date) {
+    private void onDateClick(LocalDate date) {
+        String key = date.format(KEY_FORMAT);
+
         if (editMode == MODE_ADD_SHIFT) {
-            db.setWorkday(key, true);
+            db.setWorkdayOverride(key, 1);
             editMode = MODE_NORMAL;
             refreshAll();
             return;
         }
+
         if (editMode == MODE_REMOVE_SHIFT) {
-            db.setWorkday(key, false);
+            db.setWorkdayOverride(key, 0);
             editMode = MODE_NORMAL;
             refreshAll();
             return;
         }
+
         WarehouseDatabaseHelper.Shift shift = db.getShift(key);
-        if (shift == null || !shift.isWorkday) {
+        if (!isEffectiveWorkday(date, shift)) {
             new AlertDialog.Builder(this)
-                    .setTitle(humanFormat.format(date.getTime()))
+                    .setTitle(date.format(HUMAN_FORMAT))
                     .setMessage("Сначала добавьте смену через меню «График».")
                     .setPositiveButton("OK", null)
                     .show();
             return;
         }
+
+        if (shift == null) {
+            shift = db.getOrCreateShift(key);
+            shift.isWorkday = true;
+        }
+
         showShiftDialog(shift, date);
     }
 
-    private void showShiftDialog(WarehouseDatabaseHelper.Shift shift, Calendar date) {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(16), dp(8), dp(16), 0);
+    private void showShiftDialog(
+            WarehouseDatabaseHelper.Shift shift,
+            LocalDate date
+    ) {
+        LinearLayout box = verticalDialogBox();
 
-        EditText cancel = numberInput(shift.cancelCount, "Отмены, вес 0.6");
-        EditText accept = numberInput(shift.acceptCount, "Приемка, вес 0.8");
-        EditText returns = numberInput(shift.returnCount, "Возвраты, вес 0.9");
-        EditText issue = numberInput(shift.issueCount, "Выдача / отказы / оплата, вес 1.1");
-        EditText repack = numberInput(shift.repackCount, "Переупаковка, вес 1.3");
+        EditText cancel = numberInput(shift.cancelCount, "Отмены — коэффициент 0.6");
+        EditText accept = numberInput(shift.acceptCount, "Приёмка — коэффициент 0.8");
+        EditText returns = numberInput(shift.returnCount, "Возвраты — коэффициент 0.9");
+        EditText issue = numberInput(shift.issueCount, "Выдача — коэффициент 1.1");
+        EditText rejects = numberInput(shift.rejectCount, "Отказы — коэффициент 1.1");
+        EditText payments = numberInput(shift.paymentCount, "Оплаты — коэффициент 1.1");
+        EditText repack = numberInput(shift.repackCount, "Переупаковка — коэффициент 1.3");
+
         box.addView(cancel);
         box.addView(accept);
         box.addView(returns);
         box.addView(issue);
+        box.addView(rejects);
+        box.addView(payments);
         box.addView(repack);
 
+        double currentNet = netForShift(shift);
+        TextView current = new TextView(this);
+        current.setPadding(0, dp(8), 0, 0);
+        current.setTypeface(Typeface.DEFAULT_BOLD);
+        current.setText("Сейчас за смену: " + Math.round(currentNet) + " ₽ чистыми");
+        box.addView(current);
+
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(humanFormat.format(date.getTime()))
+                .setTitle(date.format(HUMAN_FORMAT))
                 .setView(box)
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Сохранить", null)
                 .create();
-        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            shift.cancelCount = parseInt(cancel);
-            shift.acceptCount = parseInt(accept);
-            shift.returnCount = parseInt(returns);
-            shift.issueCount = parseInt(issue);
-            shift.repackCount = parseInt(repack);
-            db.saveShift(shift);
-            dialog.dismiss();
-            refreshAll();
-        }));
+
+        dialog.setOnShowListener(ignored ->
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                    shift.cancelCount = parseInt(cancel);
+                    shift.acceptCount = parseInt(accept);
+                    shift.returnCount = parseInt(returns);
+                    shift.issueCount = parseInt(issue);
+                    shift.rejectCount = parseInt(rejects);
+                    shift.paymentCount = parseInt(payments);
+                    shift.repackCount = parseInt(repack);
+                    shift.isWorkday = true;
+
+                    db.saveShift(shift);
+                    dialog.dismiss();
+                    refreshAll();
+                })
+        );
+
         dialog.show();
     }
 
-    private EditText numberInput(int value, String hint) {
-        EditText e = new EditText(this);
-        e.setHint(hint);
-        e.setText(value == 0 ? "" : String.valueOf(value));
-        e.setInputType(InputType.TYPE_CLASS_NUMBER);
-        return e;
+    private LinearLayout verticalDialogBox() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(18), dp(8), dp(18), 0);
+        return box;
     }
 
-    private int parseInt(EditText e) {
+    private EditText numberInput(int value, String hint) {
+        EditText input = new EditText(this);
+        input.setHint(hint);
+        input.setText(value == 0 ? "" : String.valueOf(value));
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        return input;
+    }
+
+    private EditText decimalInput(double value, String hint) {
+        EditText input = new EditText(this);
+        input.setHint(hint);
+        input.setText(String.valueOf(value));
+        input.setInputType(
+                InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL
+        );
+        return input;
+    }
+
+    private int parseInt(EditText input) {
         try {
-            String t = e.getText().toString().trim();
-            if (t.length() == 0) return 0;
-            return Math.max(0, Integer.parseInt(t));
-        } catch (Exception ex) {
+            String value = input.getText().toString().trim();
+            return value.isEmpty() ? 0 : Math.max(0, Integer.parseInt(value));
+        } catch (Exception ignored) {
             return 0;
         }
     }
 
-    private void renderPaymentsSummary() {
-        List<PayPeriod> list = buildPayPeriodsAroundToday();
-        StringBuilder b = new StringBuilder();
-        b.append("Выплаты\n");
-        for (PayPeriod p : list) {
-            double total = netForPeriod(p.fromKey, p.toKey);
-            b.append(p.label).append(" — ").append(Math.round(total)).append("₽\n");
+    private double parseDouble(EditText input, double fallback) {
+        try {
+            String value = input.getText().toString().trim().replace(',', '.');
+            return value.isEmpty() ? fallback : Math.max(0.0, Double.parseDouble(value));
+        } catch (Exception ignored) {
+            return fallback;
         }
-        b.append("Нажмите, чтобы открыть полный список.");
-        paymentsText.setText(b.toString());
+    }
+
+    private void renderPaymentsSummary() {
+        paymentsContainer.removeAllViews();
+
+        List<PayPeriod> periods = upcomingPayPeriods(2);
+        for (int i = 0; i < periods.size(); i++) {
+            PayPeriod period = periods.get(i);
+            TextView card = paymentCard(
+                    i == 0 ? "Ближайшая выплата" : "Следующая выплата",
+                    period
+            );
+
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    0,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    1
+            );
+            if (i == 0) {
+                params.setMarginEnd(dp(4));
+            } else {
+                params.setMarginStart(dp(4));
+            }
+            paymentsContainer.addView(card, params);
+        }
+    }
+
+    private TextView paymentCard(String heading, PayPeriod period) {
+        long total = Math.round(netForPeriod(period.from, period.to));
+
+        TextView card = new TextView(this);
+        card.setGravity(Gravity.CENTER);
+        card.setPadding(dp(7), dp(5), dp(7), dp(5));
+        card.setTextSize(13);
+        card.setTextColor(Color.rgb(25, 25, 25));
+        card.setText(
+                heading
+                        + "\n"
+                        + period.payDate.format(HUMAN_FORMAT)
+                        + "\n"
+                        + total
+                        + " ₽"
+                        + "\nза "
+                        + period.shortPeriod()
+        );
+        card.setBackground(
+                roundedBackground(
+                        Color.argb(55, Color.red(period.color),
+                                Color.green(period.color), Color.blue(period.color)),
+                        dp(3),
+                        period.color,
+                        dp(10)
+                )
+        );
+        card.setOnClickListener(v -> showPaymentsList());
+        return card;
+    }
+
+    private List<PayPeriod> upcomingPayPeriods(int count) {
+        LocalDate today = LocalDate.now();
+        List<PayPeriod> all = buildPayPeriods(
+                YearMonth.from(today).minusMonths(2),
+                YearMonth.from(today).plusMonths(5)
+        );
+        all.sort(Comparator.comparing(period -> period.payDate));
+
+        List<PayPeriod> result = new ArrayList<>();
+        for (PayPeriod period : all) {
+            if (!period.payDate.isBefore(today)) {
+                result.add(period);
+                if (result.size() == count) {
+                    break;
+                }
+            }
+        }
+        return result;
     }
 
     private void showPaymentsList() {
-        Calendar start = Calendar.getInstance();
-        start.add(Calendar.MONTH, -6);
-        Calendar end = Calendar.getInstance();
-        end.add(Calendar.MONTH, 6);
-        List<PayPeriod> all = buildPayPeriods(start, end);
-        StringBuilder b = new StringBuilder();
-        for (PayPeriod p : all) {
-            b.append(p.label)
-                    .append("\nПериод: ")
-                    .append(p.fromHuman)
+        YearMonth current = YearMonth.now();
+        List<PayPeriod> all = buildPayPeriods(
+                current.minusMonths(12),
+                current.plusMonths(12)
+        );
+        all.sort(Comparator.comparing(period -> period.payDate));
+
+        StringBuilder text = new StringBuilder();
+        for (PayPeriod period : all) {
+            if (period.payDate.isAfter(LocalDate.now().plusMonths(8))) {
+                continue;
+            }
+
+            text.append(period.payDate.format(HUMAN_FORMAT))
+                    .append("\n")
+                    .append(period.from.format(DateTimeFormatter.ofPattern("d MMM")))
                     .append(" — ")
-                    .append(p.toHuman)
+                    .append(period.to.format(DateTimeFormatter.ofPattern("d MMM yyyy")))
                     .append("\nК выплате: ")
-                    .append(Math.round(netForPeriod(p.fromKey, p.toKey)))
-                    .append("₽\n\n");
+                    .append(Math.round(netForPeriod(period.from, period.to)))
+                    .append(" ₽\n\n");
         }
+
         new AlertDialog.Builder(this)
-                .setTitle("Все выплаты")
-                .setMessage(b.toString())
+                .setTitle("Выплаты")
+                .setMessage(text.length() == 0 ? "Выплат пока нет." : text.toString())
                 .setPositiveButton("OK", null)
                 .show();
     }
 
-    private List<PayPeriod> buildPayPeriodsAroundToday() {
-        List<PayPeriod> all = buildPayPeriods(addMonths(Calendar.getInstance(), -3), addMonths(Calendar.getInstance(), 3));
-        long now = System.currentTimeMillis();
-        int nearest = 0;
-        for (int i = 0; i < all.size(); i++) {
-            if (all.get(i).payDate.getTimeInMillis() >= now) {
-                nearest = i;
-                break;
-            }
-        }
+    private List<PayPeriod> buildPayPeriods(YearMonth from, YearMonth to) {
         List<PayPeriod> result = new ArrayList<>();
-        if (nearest > 0) result.add(all.get(nearest - 1));
-        result.add(all.get(nearest));
-        if (nearest + 1 < all.size()) result.add(all.get(nearest + 1));
+        YearMonth month = from;
+
+        while (!month.isAfter(to)) {
+            LocalDate firstFrom = month.atDay(1);
+            LocalDate firstTo = month.atDay(15);
+            LocalDate firstPay = month.atDay(25);
+            result.add(new PayPeriod(
+                    firstPay,
+                    firstFrom,
+                    firstTo,
+                    colorForPayPeriod(firstFrom)
+            ));
+
+            LocalDate secondFrom = month.atDay(16);
+            LocalDate secondTo = month.atEndOfMonth();
+            LocalDate secondPay = month.plusMonths(1).atDay(10);
+            result.add(new PayPeriod(
+                    secondPay,
+                    secondFrom,
+                    secondTo,
+                    colorForPayPeriod(secondFrom)
+            ));
+
+            month = month.plusMonths(1);
+        }
+
         return result;
     }
 
-    private List<PayPeriod> buildPayPeriods(Calendar from, Calendar to) {
-        List<PayPeriod> result = new ArrayList<>();
-        Calendar c = (Calendar) from.clone();
-        c.set(Calendar.DAY_OF_MONTH, 1);
-        while (!c.after(to)) {
-            Calendar prev = (Calendar) c.clone();
-            prev.add(Calendar.MONTH, -1);
-            int prevLast = prev.getActualMaximum(Calendar.DAY_OF_MONTH);
-            Calendar pay10 = (Calendar) c.clone(); pay10.set(Calendar.DAY_OF_MONTH, 10);
-            Calendar pay25 = (Calendar) c.clone(); pay25.set(Calendar.DAY_OF_MONTH, 25);
-            result.add(new PayPeriod(pay10, prev, 1, 15));
-            result.add(new PayPeriod(pay25, prev, 16, prevLast));
-            c.add(Calendar.MONTH, 1);
-        }
-        return result;
-    }
-
-    private double netForPeriod(String fromKey, String toKey) {
+    private double netForPeriod(LocalDate from, LocalDate to) {
         double total = 0.0;
-        for (WarehouseDatabaseHelper.Shift s : db.getShiftsBetween(fromKey, toKey)) {
-            total += s.net();
+        for (WarehouseDatabaseHelper.Shift shift :
+                db.getShiftsBetween(from.format(KEY_FORMAT), to.format(KEY_FORMAT))) {
+            total += netForShift(shift);
         }
         return total;
     }
 
-    private class PayPeriod {
-        final Calendar payDate;
-        final String fromKey;
-        final String toKey;
-        final String fromHuman;
-        final String toHuman;
-        final String label;
+    private double netForShift(WarehouseDatabaseHelper.Shift shift) {
+        return shift.net(
+                getBasePickPrice(),
+                getShiftHours(),
+                getHourlyRate(),
+                getTaxPercent()
+        );
+    }
 
-        PayPeriod(Calendar payDate, Calendar workMonth, int fromDay, int toDay) {
-            this.payDate = payDate;
-            Calendar from = (Calendar) workMonth.clone(); from.set(Calendar.DAY_OF_MONTH, fromDay);
-            Calendar to = (Calendar) workMonth.clone(); to.set(Calendar.DAY_OF_MONTH, toDay);
-            fromKey = keyFormat.format(from.getTime());
-            toKey = keyFormat.format(to.getTime());
-            fromHuman = humanFormat.format(from.getTime());
-            toHuman = humanFormat.format(to.getTime());
-            label = humanFormat.format(payDate.getTime());
+    private int colorForPayPeriod(LocalDate date) {
+        boolean firstHalf = date.getDayOfMonth() <= 15;
+        boolean evenMonth = date.getMonthValue() % 2 == 0;
+
+        if (evenMonth) {
+            return firstHalf ? COLOR_BLUE : COLOR_ORANGE;
         }
+        return firstHalf ? COLOR_GREEN_PERIOD : COLOR_PURPLE;
     }
 
-    private void moveMonth(int delta) {
-        visibleMonth.add(Calendar.MONTH, delta);
-        visibleMonth.set(Calendar.DAY_OF_MONTH, 1);
-        applyScheduleForVisibleMonth();
-        refreshAll();
+    private GradientDrawable roundedBackground(
+            int fillColor,
+            int strokeWidth,
+            int strokeColor,
+            int radius
+    ) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(fillColor);
+        drawable.setCornerRadius(radius);
+        drawable.setStroke(strokeWidth, strokeColor);
+        return drawable;
     }
 
-    private void goToday() {
-        visibleMonth = Calendar.getInstance();
-        visibleMonth.set(Calendar.DAY_OF_MONTH, 1);
-        applyScheduleForVisibleMonth();
-        refreshAll();
+    private double getBasePickPrice() {
+        return prefs.getFloat(KEY_BASE_PICK_PRICE, 6.1f);
     }
 
-    private Calendar addMonths(Calendar base, int months) {
-        Calendar c = (Calendar) base.clone();
-        c.add(Calendar.MONTH, months);
-        return c;
+    private double getShiftHours() {
+        return prefs.getFloat(KEY_SHIFT_HOURS, 10.75f);
     }
 
-    private boolean sameDay(Calendar a, Calendar b) {
-        return a.get(Calendar.YEAR) == b.get(Calendar.YEAR) &&
-                a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR);
+    private double getHourlyRate() {
+        return prefs.getFloat(KEY_HOURLY_RATE, 147.0f);
     }
 
-    private String capitalize(String s) {
-        if (s == null || s.length() == 0) return "";
-        return s.substring(0, 1).toUpperCase(new Locale("ru")) + s.substring(1);
+    private double getTaxPercent() {
+        return prefs.getFloat(KEY_TAX_PERCENT, 13.0f);
+    }
+
+    private String capitalize(String value) {
+        if (value == null || value.isEmpty()) {
+            return "";
+        }
+        return value.substring(0, 1).toUpperCase(new Locale("ru"))
+                + value.substring(1);
     }
 
     private int dp(int value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private static class PayPeriod {
+        final LocalDate payDate;
+        final LocalDate from;
+        final LocalDate to;
+        final int color;
+
+        PayPeriod(LocalDate payDate, LocalDate from, LocalDate to, int color) {
+            this.payDate = payDate;
+            this.from = from;
+            this.to = to;
+            this.color = color;
+        }
+
+        String shortPeriod() {
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("d MMM", new Locale("ru"));
+            return from.format(formatter) + "–" + to.format(formatter);
+        }
     }
 }

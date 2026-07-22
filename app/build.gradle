@@ -5,7 +5,6 @@ plugins {
 android {
     namespace "com.kersorus.timecalendar"
     compileSdk 35
-
     flavorDimensions "target"
 
     defaultConfig {
@@ -30,7 +29,8 @@ android {
         warehouse {
             dimension "target"
             applicationId "com.kersorus.warehousepay"
-            versionNameSuffix "-warehouse"
+            versionCode 8
+            versionName "0.7.0"
         }
     }
 

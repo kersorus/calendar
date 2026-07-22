@@ -10,8 +10,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class WarehouseDatabaseHelper extends SQLiteOpenHelper {
-    private static final String DB_NAME = "warehouse_pay.db";
-    private static final int DB_VERSION = 1;
+    public static final String DB_NAME = "warehouse_pay.db";
+    private static final int DB_VERSION = 2;
 
     public WarehouseDatabaseHelper(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
@@ -19,92 +19,134 @@ public class WarehouseDatabaseHelper extends SQLiteOpenHelper {
 
     @Override
     public void onCreate(SQLiteDatabase db) {
-        db.execSQL("CREATE TABLE shifts (" +
-                "date_text TEXT PRIMARY KEY, " +
-                "is_workday INTEGER NOT NULL DEFAULT 0, " +
-                "cancel_count INTEGER NOT NULL DEFAULT 0, " +
-                "accept_count INTEGER NOT NULL DEFAULT 0, " +
-                "return_count INTEGER NOT NULL DEFAULT 0, " +
-                "issue_count INTEGER NOT NULL DEFAULT 0, " +
-                "repack_count INTEGER NOT NULL DEFAULT 0" +
-                ")");
+        db.execSQL(
+                "CREATE TABLE shifts (" +
+                        "date_text TEXT PRIMARY KEY, " +
+                        "is_workday INTEGER NOT NULL DEFAULT 0, " +
+                        "workday_override INTEGER NOT NULL DEFAULT -1, " +
+                        "cancel_count INTEGER NOT NULL DEFAULT 0, " +
+                        "accept_count INTEGER NOT NULL DEFAULT 0, " +
+                        "return_count INTEGER NOT NULL DEFAULT 0, " +
+                        "issue_count INTEGER NOT NULL DEFAULT 0, " +
+                        "reject_count INTEGER NOT NULL DEFAULT 0, " +
+                        "payment_count INTEGER NOT NULL DEFAULT 0, " +
+                        "repack_count INTEGER NOT NULL DEFAULT 0" +
+                        ")"
+        );
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        db.execSQL("DROP TABLE IF EXISTS shifts");
-        onCreate(db);
+        if (oldVersion < 2) {
+            addColumnIfMissing(db,
+                    "ALTER TABLE shifts ADD COLUMN workday_override INTEGER NOT NULL DEFAULT -1");
+            addColumnIfMissing(db,
+                    "ALTER TABLE shifts ADD COLUMN reject_count INTEGER NOT NULL DEFAULT 0");
+            addColumnIfMissing(db,
+                    "ALTER TABLE shifts ADD COLUMN payment_count INTEGER NOT NULL DEFAULT 0");
+        }
+    }
+
+    private void addColumnIfMissing(SQLiteDatabase db, String sql) {
+        try {
+            db.execSQL(sql);
+        } catch (Exception ignored) {
+            // Колонка уже существует.
+        }
     }
 
     public Shift getShift(String dateText) {
-        SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery(
-                "SELECT date_text, is_workday, cancel_count, accept_count, return_count, issue_count, repack_count " +
+        Cursor cursor = getReadableDatabase().rawQuery(
+                "SELECT date_text, is_workday, workday_override, " +
+                        "cancel_count, accept_count, return_count, issue_count, " +
+                        "reject_count, payment_count, repack_count " +
                         "FROM shifts WHERE date_text = ?",
                 new String[]{dateText}
         );
-        Shift shift = null;
-        if (c.moveToFirst()) {
-            shift = fromCursor(c);
+
+        Shift result = null;
+        if (cursor.moveToFirst()) {
+            result = fromCursor(cursor);
         }
-        c.close();
-        return shift;
+        cursor.close();
+        return result;
     }
 
-    public void setWorkday(String dateText, boolean workday) {
+    public Shift getOrCreateShift(String dateText) {
         Shift shift = getShift(dateText);
-        if (shift == null) {
-            shift = new Shift(dateText);
-        }
-        shift.isWorkday = workday;
+        return shift == null ? new Shift(dateText) : shift;
+    }
+
+    public void setWorkdayOverride(String dateText, int overrideValue) {
+        Shift shift = getOrCreateShift(dateText);
+        shift.workdayOverride = overrideValue;
+        shift.isWorkday = overrideValue == 1;
         saveShift(shift);
     }
 
     public void saveShift(Shift shift) {
-        ContentValues v = new ContentValues();
-        v.put("date_text", shift.dateText);
-        v.put("is_workday", shift.isWorkday ? 1 : 0);
-        v.put("cancel_count", shift.cancelCount);
-        v.put("accept_count", shift.acceptCount);
-        v.put("return_count", shift.returnCount);
-        v.put("issue_count", shift.issueCount);
-        v.put("repack_count", shift.repackCount);
-        getWritableDatabase().insertWithOnConflict("shifts", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+        ContentValues values = new ContentValues();
+        values.put("date_text", shift.dateText);
+        values.put("is_workday", shift.isWorkday ? 1 : 0);
+        values.put("workday_override", shift.workdayOverride);
+        values.put("cancel_count", shift.cancelCount);
+        values.put("accept_count", shift.acceptCount);
+        values.put("return_count", shift.returnCount);
+        values.put("issue_count", shift.issueCount);
+        values.put("reject_count", shift.rejectCount);
+        values.put("payment_count", shift.paymentCount);
+        values.put("repack_count", shift.repackCount);
+
+        getWritableDatabase().insertWithOnConflict(
+                "shifts",
+                null,
+                values,
+                SQLiteDatabase.CONFLICT_REPLACE
+        );
     }
 
     public List<Shift> getShiftsBetween(String from, String to) {
-        SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery(
-                "SELECT date_text, is_workday, cancel_count, accept_count, return_count, issue_count, repack_count " +
+        Cursor cursor = getReadableDatabase().rawQuery(
+                "SELECT date_text, is_workday, workday_override, " +
+                        "cancel_count, accept_count, return_count, issue_count, " +
+                        "reject_count, payment_count, repack_count " +
                         "FROM shifts WHERE date_text >= ? AND date_text <= ? ORDER BY date_text",
                 new String[]{from, to}
         );
+
         List<Shift> result = new ArrayList<>();
-        while (c.moveToNext()) {
-            result.add(fromCursor(c));
+        while (cursor.moveToNext()) {
+            result.add(fromCursor(cursor));
         }
-        c.close();
+        cursor.close();
         return result;
     }
 
-    private Shift fromCursor(Cursor c) {
-        Shift s = new Shift(c.getString(0));
-        s.isWorkday = c.getInt(1) == 1;
-        s.cancelCount = c.getInt(2);
-        s.acceptCount = c.getInt(3);
-        s.returnCount = c.getInt(4);
-        s.issueCount = c.getInt(5);
-        s.repackCount = c.getInt(6);
-        return s;
+    private Shift fromCursor(Cursor cursor) {
+        Shift shift = new Shift(cursor.getString(0));
+        shift.isWorkday = cursor.getInt(1) == 1;
+        shift.workdayOverride = cursor.getInt(2);
+        shift.cancelCount = cursor.getInt(3);
+        shift.acceptCount = cursor.getInt(4);
+        shift.returnCount = cursor.getInt(5);
+        shift.issueCount = cursor.getInt(6);
+        shift.rejectCount = cursor.getInt(7);
+        shift.paymentCount = cursor.getInt(8);
+        shift.repackCount = cursor.getInt(9);
+        return shift;
     }
 
     public static class Shift {
         public final String dateText;
         public boolean isWorkday;
+        public int workdayOverride = -1;
+
         public int cancelCount;
         public int acceptCount;
         public int returnCount;
         public int issueCount;
+        public int rejectCount;
+        public int paymentCount;
         public int repackCount;
 
         public Shift(String dateText) {
@@ -112,29 +154,43 @@ public class WarehouseDatabaseHelper extends SQLiteOpenHelper {
         }
 
         public int totalPicks() {
-            return cancelCount + acceptCount + returnCount + issueCount + repackCount;
+            return cancelCount
+                    + acceptCount
+                    + returnCount
+                    + issueCount
+                    + rejectCount
+                    + paymentCount
+                    + repackCount;
         }
 
-        public double picksGross() {
-            return 6.1 * (
-                    cancelCount * 0.6 +
-                            acceptCount * 0.8 +
-                            returnCount * 0.9 +
-                            issueCount * 1.1 +
-                            repackCount * 1.3
+        public double picksGross(double basePickPrice) {
+            return basePickPrice * (
+                    cancelCount * 0.6
+                            + acceptCount * 0.8
+                            + returnCount * 0.9
+                            + issueCount * 1.1
+                            + rejectCount * 1.1
+                            + paymentCount * 1.1
+                            + repackCount * 1.3
             );
         }
 
-        public double shiftGross() {
-            return totalPicks() > 0 ? 10.75 * 147.0 : 0.0;
+        public double shiftGross(double shiftHours, double hourlyRate) {
+            return totalPicks() > 0 ? shiftHours * hourlyRate : 0.0;
         }
 
-        public double gross() {
-            return picksGross() + shiftGross();
+        public double gross(double basePickPrice, double shiftHours, double hourlyRate) {
+            return picksGross(basePickPrice) + shiftGross(shiftHours, hourlyRate);
         }
 
-        public double net() {
-            return gross() * 0.87;
+        public double net(
+                double basePickPrice,
+                double shiftHours,
+                double hourlyRate,
+                double taxPercent
+        ) {
+            double taxMultiplier = 1.0 - Math.max(0.0, Math.min(100.0, taxPercent)) / 100.0;
+            return gross(basePickPrice, shiftHours, hourlyRate) * taxMultiplier;
         }
     }
 }

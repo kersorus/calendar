@@ -2,8 +2,11 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <application
-        android:label="Складская зарплата"
-        tools:replace="android:label">
+        android:label="Зарплата"
+        android:icon="@drawable/ic_warehouse_logo"
+        android:roundIcon="@drawable/ic_warehouse_logo"
+        android:theme="@style/WarehouseTheme"
+        tools:replace="android:label,android:icon,android:roundIcon,android:theme">
 
         <activity
             android:name="com.kersorus.timecalendar.WarehouseActivity"

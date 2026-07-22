@@ -1,4 +1,3 @@
-try { window.LASDebugLog && window.LASDebugLog("app.js loaded"); } catch(e) {}
 import {
   loadState,
   saveState,
@@ -6,49 +5,41 @@ import {
   parseBackupFile,
   chooseAutomaticBackupFile,
   disableAutomaticBackup,
-  getAutomaticBackupStatus
+  getAutomaticBackupStatus,
 } from "./storage.js";
+import { normalizeState } from "./migration.js";
+import { initCloudUi } from "./cloud_ui.js";
 
-const defaults = {
+export const defaults = Object.freeze({
   settings: {
     basePickPrice: 6.1,
     shiftHours: 10.75,
     hourlyRate: 147,
-    taxPercent: 13
+    taxPercent: 13,
   },
-  schedule: {pattern: "", anchorDate: ""},
-  shifts: {}
-};
+  schedule: { pattern: "", anchorDate: "" },
+  shifts: {},
+});
 
-let state = await loadState(defaults);
-
-const $ = id => document.getElementById(id);
+let state = normalizeState(await loadState(defaults), defaults);
 
 async function persist() {
   await saveState(state);
   window.dispatchEvent(new CustomEvent("las-state-changed"));
 }
 
-function mergeImportedState(data) {
-  return {
-    settings: {...defaults.settings, ...(data?.settings || {})},
-    schedule: {...defaults.schedule, ...(data?.schedule || {})},
-    shifts: data?.shifts && typeof data.shifts === "object" ? data.shifts : {}
-  };
-}
-
-// Совместимый публичный API для существующего интерфейса.
-window.LaStorage = {
+window.LaStorage = Object.freeze({
   getState: () => state,
 
   async replaceState(nextState) {
-    state = mergeImportedState(nextState);
+    state = normalizeState(nextState, defaults);
     await persist();
   },
 
   async update(mutator) {
-    const changed = mutator(state);
-    if (changed !== undefined) state = changed;
+    const draft = state;
+    const changed = mutator(draft);
+    state = normalizeState(changed !== undefined ? changed : draft, defaults);
     await persist();
   },
 
@@ -59,7 +50,7 @@ window.LaStorage = {
   async importJson(file) {
     const imported = await parseBackupFile(file);
     if (!confirm("Заменить текущие данные импортированными?")) return false;
-    state = mergeImportedState(imported);
+    state = normalizeState(imported, defaults);
     await persist();
     return true;
   },
@@ -74,8 +65,14 @@ window.LaStorage = {
     return getAutomaticBackupStatus();
   },
 
-  getAutoBackupStatus: getAutomaticBackupStatus
-};
+  getAutoBackupStatus: getAutomaticBackupStatus,
+});
 
-// Подключаем существующий UI-файл после инициализации IndexedDB.
 await import("./ui.js");
+await initCloudUi(defaults);
+
+if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  navigator.serviceWorker.register("./sw.js").catch(error => {
+    console.warn("Service worker registration failed", error);
+  });
+}

@@ -1,96 +1,149 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<script>
-(function () {
-  window.__LAS_DEBUG = [];
-  window.LASDebugLog = function(msg) {
-    window.__LAS_DEBUG.push(msg);
-    console.log("[LAS DEBUG]", msg);
-  };
-
-  window.addEventListener("error", function(e) {
-    const box = document.createElement("pre");
-    box.style = "position:fixed;top:0;left:0;right:0;background:#500;color:white;z-index:99999;padding:12px;white-space:pre-wrap";
-    box.textContent =
-      "LAS ERROR\n\n" +
-      e.message + "\n\n" +
-      e.filename + ":" + e.lineno + ":" + e.colno + "\n\n" +
-      (e.error ? e.error.stack : "");
-    document.body.appendChild(box);
-  });
-
-  window.addEventListener("unhandledrejection", function(e) {
-    const box = document.createElement("pre");
-    box.style = "position:fixed;top:0;left:0;right:0;background:#800;color:white;z-index:99999;padding:12px;white-space:pre-wrap";
-    box.textContent = "PROMISE ERROR\n\n" + e.reason;
-    document.body.appendChild(box);
-  });
-
-  window.LASDebugLog("index loaded");
-})();
-</script>
-
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#171719">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="La$">
+  <meta name="description" content="Календарь смен, расчёт зарплаты и защищённая синхронизация через Google Drive">
   <title>Зарплата La$</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./cloud.css">
+  <script src="./config.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
-<div class="app-shell">
-<header class="topbar"><h1>Зарплата</h1><button id="menuButton" class="icon-button">☰</button></header>
-<section class="month-nav"><button id="prevMonth" class="icon-button">‹</button><button id="monthTitle" class="month-title"></button><button id="todayButton" class="icon-button small">●</button><button id="nextMonth" class="icon-button">›</button></section>
-<button id="scheduleButton" class="primary-button">График</button>
-<div id="modeHint" class="mode-hint"></div>
-<section id="calendar" class="calendar"></section>
-<section id="payments" class="payments"></section>
-</div>
+  <div class="app-shell">
+    <header class="topbar">
+      <h1>Зарплата</h1>
+      <button id="menuButton" class="icon-button" aria-label="Открыть меню">☰</button>
+    </header>
 
-<dialog id="menuDialog"><form method="dialog" class="dialog-card">
-<h2>Меню</h2>
-<button id="settingsButton" type="button">Настройки</button>
-<button id="allPaymentsButton" type="button">Все выплаты</button>
-<button id="exportButton" type="button">Экспорт JSON</button>
-<label class="file-button">Импорт JSON<input id="importInput" type="file" accept=".json,application/json"></label>
-<div id="storageStatus" class="storage-status"></div>
-<button id="enableAutoBackupButton" type="button">Включить автосохранение в файл</button>
-<button id="disableAutoBackupButton" type="button" hidden>Отключить автосохранение</button>
-<button value="close">Закрыть</button>
-</form></dialog>
+    <section class="month-nav" aria-label="Навигация по месяцам">
+      <button id="prevMonth" class="icon-button" aria-label="Предыдущий месяц">‹</button>
+      <button id="monthTitle" class="month-title"></button>
+      <button id="todayButton" class="icon-button small" aria-label="Текущий месяц">●</button>
+      <button id="nextMonth" class="icon-button" aria-label="Следующий месяц">›</button>
+    </section>
 
-<dialog id="scheduleDialog"><form method="dialog" class="dialog-card">
-<h2>График</h2><button data-pattern="2/2" type="button">2/2</button><button data-pattern="3/3" type="button">3/3</button><button data-pattern="5/2" type="button">5/2</button>
-<button id="addShiftMode" type="button">Добавить смену</button><button id="removeShiftMode" type="button">Убрать смену</button><button value="close">Закрыть</button>
-</form></dialog>
+    <button id="scheduleButton" class="primary-button">График</button>
+    <div id="modeHint" class="mode-hint"></div>
+    <section id="calendar" class="calendar"></section>
+    <section id="payments" class="payments"></section>
+  </div>
 
-<dialog id="anchorDialog"><form method="dialog" class="dialog-card"><h2>Дата рабочего дня</h2><input id="anchorDate" type="date"><button id="savePatternButton" type="button">Сохранить</button><button value="close">Отмена</button></form></dialog>
+  <dialog id="menuDialog">
+    <form method="dialog" class="dialog-card">
+      <h2>Меню</h2>
+      <button id="settingsButton" type="button">Настройки</button>
+      <button id="allPaymentsButton" type="button">Все выплаты</button>
 
-<dialog id="shiftDialog"><form method="dialog" class="dialog-card">
-<h2 id="shiftDateTitle"></h2>
-<label>Отмены ×0.6<input id="cancelCount" type="number" min="0"></label>
-<label>Приёмка ×0.8<input id="acceptCount" type="number" min="0"></label>
-<label>Возвраты ×0.9<input id="returnCount" type="number" min="0"></label>
-<label>Выдача ×1.1<input id="issueCount" type="number" min="0"></label>
-<label>Отказы ×1.1<input id="rejectCount" type="number" min="0"></label>
-<label>Оплаты ×1.1<input id="paymentCount" type="number" min="0"></label>
-<label>Переупаковка ×1.3<input id="repackCount" type="number" min="0"></label>
-<div id="shiftPreview" class="preview"></div><button id="saveShiftButton" type="button">Сохранить</button><button value="close">Отмена</button>
-</form></dialog>
+      <section class="cloud-card" aria-labelledby="cloudTitle">
+        <div class="cloud-card__header">
+          <strong id="cloudTitle">Google Drive</strong>
+          <span id="cloudStatusBadge" class="cloud-status-badge">Локально</span>
+        </div>
+        <p id="cloudStatusText">Данные хранятся только на этом устройстве</p>
+        <p id="cloudAccount" class="cloud-account" hidden></p>
+        <div class="cloud-actions">
+          <button id="connectGoogleButton" type="button">Подключить Google</button>
+          <button id="syncNowButton" type="button" disabled>Синхронизировать</button>
+          <button id="disconnectGoogleButton" type="button" hidden>Отключить</button>
+        </div>
+        <label class="cloud-toggle">
+          <input id="autoSyncInput" type="checkbox" checked>
+          Автосинхронизация после изменений
+        </label>
+        <p id="cloudLastSync" class="cloud-last-sync">Последняя синхронизация: ещё не было</p>
+        <p class="cloud-note">Копия скрыта от других приложений и доступна только La$.</p>
+      </section>
 
-<dialog id="settingsDialog"><form method="dialog" class="dialog-card">
-<h2>Настройки</h2>
-<label>Базовая цена пика<input id="basePickPrice" type="number" step=".01"></label>
-<label>Часов в смене<input id="shiftHours" type="number" step=".01"></label>
-<label>Ставка в час<input id="hourlyRate" type="number" step=".01"></label>
-<label>Налог, %<input id="taxPercent" type="number" step=".01"></label>
-<button id="saveSettingsButton" type="button">Сохранить</button><button value="close">Отмена</button>
-</form></dialog>
+      <button id="exportButton" type="button">Экспорт JSON</button>
+      <label class="file-button">Импорт JSON
+        <input id="importInput" type="file" accept=".json,application/json">
+      </label>
+      <div id="storageStatus" class="storage-status"></div>
+      <button id="enableAutoBackupButton" type="button">Включить автосохранение в файл</button>
+      <button id="disableAutoBackupButton" type="button" hidden>Отключить автосохранение</button>
+      <button value="close">Закрыть</button>
+    </form>
+  </dialog>
 
-<dialog id="paymentsDialog"><form method="dialog" class="dialog-card large"><h2>Все выплаты</h2><div id="paymentsList"></div><button value="close">Закрыть</button></form></dialog>
-<script type="module" src="./app.js"></script>
-</body></html>
+  <dialog id="scheduleDialog">
+    <form method="dialog" class="dialog-card">
+      <h2>График</h2>
+      <button data-pattern="2/2" type="button">2/2</button>
+      <button data-pattern="3/3" type="button">3/3</button>
+      <button data-pattern="5/2" type="button">5/2</button>
+      <button id="addShiftMode" type="button">Добавить смену</button>
+      <button id="removeShiftMode" type="button">Убрать смену</button>
+      <button value="close">Закрыть</button>
+    </form>
+  </dialog>
+
+  <dialog id="anchorDialog">
+    <form method="dialog" class="dialog-card">
+      <h2>Дата рабочего дня</h2>
+      <input id="anchorDate" type="date">
+      <button id="savePatternButton" type="button">Сохранить</button>
+      <button value="close">Отмена</button>
+    </form>
+  </dialog>
+
+  <dialog id="shiftDialog">
+    <form method="dialog" class="dialog-card">
+      <h2 id="shiftDateTitle"></h2>
+      <label>Отмены ×0.6<input id="cancelCount" type="number" min="0"></label>
+      <label>Приёмка ×0.8<input id="acceptCount" type="number" min="0"></label>
+      <label>Возвраты ×0.9<input id="returnCount" type="number" min="0"></label>
+      <label>Выдача ×1.1<input id="issueCount" type="number" min="0"></label>
+      <label>Отказы ×1.1<input id="rejectCount" type="number" min="0"></label>
+      <label>Оплаты ×1.1<input id="paymentCount" type="number" min="0"></label>
+      <label>Переупаковка ×1.3<input id="repackCount" type="number" min="0"></label>
+      <div id="shiftPreview" class="preview"></div>
+      <button id="saveShiftButton" type="button">Сохранить</button>
+      <button value="close">Отмена</button>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDialog">
+    <form method="dialog" class="dialog-card">
+      <h2>Настройки</h2>
+      <label>Базовая цена пика<input id="basePickPrice" type="number" step=".01"></label>
+      <label>Часов в смене<input id="shiftHours" type="number" step=".01"></label>
+      <label>Ставка в час<input id="hourlyRate" type="number" step=".01"></label>
+      <label>Налог, %<input id="taxPercent" type="number" step=".01"></label>
+      <button id="saveSettingsButton" type="button">Сохранить</button>
+      <button value="close">Отмена</button>
+    </form>
+  </dialog>
+
+  <dialog id="paymentsDialog">
+    <form method="dialog" class="dialog-card large">
+      <h2>Все выплаты</h2>
+      <div id="paymentsList"></div>
+      <button value="close">Закрыть</button>
+    </form>
+  </dialog>
+
+  <dialog id="cloudSetupDialog">
+    <form method="dialog" class="dialog-card cloud-onboarding">
+      <h2>Не потерять данные</h2>
+      <p>Подключите Google Drive, чтобы смены и настройки восстанавливались на новом телефоне.</p>
+      <ul>
+        <li>локальная работа остаётся доступной без интернета;</li>
+        <li>при входе с другого устройства данные объединяются;</li>
+        <li>резервная копия хранится в закрытой папке приложения.</li>
+      </ul>
+      <button id="cloudSetupConnectButton" class="primary-button" type="button">Подключить Google</button>
+      <button id="cloudSetupLaterButton" type="button">Пока работать локально</button>
+    </form>
+  </dialog>
+
+  <div id="cloudToast" class="cloud-toast" role="status" aria-live="polite" hidden></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

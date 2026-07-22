@@ -1,0 +1,111 @@
+.cloud-card {
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent, #5d5fef) 25%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel, #fff) 94%, var(--accent, #5d5fef) 6%);
+}
+
+.cloud-card__header,
+.cloud-actions,
+.cloud-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cloud-card__header {
+  justify-content: space-between;
+}
+
+.cloud-card p {
+  margin: 8px 0;
+}
+
+.cloud-actions {
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.cloud-actions button {
+  flex: 1 1 145px;
+}
+
+.cloud-status-badge {
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #eceef4;
+  color: #4b5563;
+}
+
+.cloud-status-badge[data-state="connected"] {
+  background: #dff7e7;
+  color: #137333;
+}
+
+.cloud-status-badge[data-state="syncing"],
+.cloud-status-badge[data-state="connecting"] {
+  background: #e7efff;
+  color: #174ea6;
+}
+
+.cloud-status-badge[data-state="authRequired"] {
+  background: #fff4d6;
+  color: #8a5300;
+}
+
+.cloud-status-badge[data-state="error"] {
+  background: #fde8e8;
+  color: #b3261e;
+}
+
+.cloud-account,
+.cloud-last-sync,
+.cloud-note {
+  color: var(--muted, #667085);
+  font-size: 13px;
+}
+
+.cloud-toggle {
+  margin-top: 12px;
+  cursor: pointer;
+}
+
+.cloud-onboarding {
+  max-width: 440px;
+}
+
+.cloud-onboarding ul {
+  padding-left: 20px;
+  line-height: 1.5;
+}
+
+.cloud-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  z-index: 1000;
+  max-width: min(420px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  padding: 11px 15px;
+  border-radius: 12px;
+  color: #fff;
+  background: #25262b;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+  text-align: center;
+}
+
+.cloud-toast[data-kind="success"] {
+  background: #176b3a;
+}
+
+.cloud-toast[data-kind="error"] {
+  background: #a62a25;
+}
+
+button[aria-busy="true"] {
+  cursor: progress;
+  opacity: 0.7;
+}

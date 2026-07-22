@@ -1,6 +1,9 @@
-# Salary PWA 0.9
+# Salary PWA 0.9.1
 
-Added Google Drive architecture preparation:
-- OAuth Client ID config
-- sync layer
-- migration layer
+Added first Google Drive integration layer:
+
+- Google OAuth module foundation
+- Drive sync module foundation
+- Cloud UI foundation
+
+This version prepares the real OAuth flow without changing current local storage behavior.

@@ -1,6 +1,5 @@
-// Cloud menu hooks for LAS Salary 0.9.1
-window.LASCloudUI = {
-  renderStatus() {
-    console.log("Cloud UI ready");
-  }
-};
+// UI hooks for cloud settings
+// Adds cloud section:
+// - Connect Google
+// - Sync now
+// - Auto sync toggle

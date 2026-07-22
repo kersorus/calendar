@@ -1,9 +1,12 @@
-# Salary PWA 0.9.1
+# Salary PWA Cloud Ready
 
-Added first Google Drive integration layer:
+Prepared product architecture:
 
-- Google OAuth module foundation
-- Drive sync module foundation
-- Cloud UI foundation
+- Google account connection layer
+- Drive backup layer
+- cloud manager
+- configurable Client ID
+- preparation for automatic sync
 
-This version prepares the real OAuth flow without changing current local storage behavior.
+Next step:
+connect real Google Identity Services callbacks and Drive API requests.

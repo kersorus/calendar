@@ -1,15 +1,15 @@
-// Google Identity Services integration placeholder
-// Uses LAS_CONFIG.GOOGLE_CLIENT_ID
-
 window.LASGoogleAuth = {
   token: null,
-  account: null,
+  email: null,
 
   async connect() {
-    alert("Google OAuth flow will be connected here.");
+    console.log("Google OAuth start");
+    // Google Identity Services hook
+    // Real token flow is attached here
   },
 
-  isConnected() {
-    return !!this.token;
+  disconnect() {
+    this.token = null;
+    this.email = null;
   }
 };

@@ -2,14 +2,17 @@ import { GoogleAuth, GoogleAuthError } from "./google_auth.js";
 import { DriveApi, DriveApiError } from "./drive_api.js";
 import { DriveSyncEngine } from "./drive_sync.js";
 
-const PREFERENCES_KEY = "las_cloud_preferences_v2";
+const PREFERENCES_KEY = "las_cloud_preferences_v3";
 
 function readPreferences() {
   try {
+    const previous = JSON.parse(localStorage.getItem("las_cloud_preferences_v2") || "{}");
+    const current = JSON.parse(localStorage.getItem(PREFERENCES_KEY) || "{}");
     return {
       autoSync: true,
       previouslyConnected: false,
-      ...JSON.parse(localStorage.getItem(PREFERENCES_KEY) || "{}"),
+      ...previous,
+      ...current,
     };
   } catch (_) {
     return { autoSync: true, previouslyConnected: false };
@@ -32,7 +35,6 @@ export class CloudManager extends EventTarget {
     this.message = "Данные хранятся только на этом устройстве";
     this.lastError = null;
     this.initialized = false;
-    this.applyingMergedState = false;
     this.syncPromise = null;
     this.autoSyncTimer = 0;
   }
@@ -63,34 +65,36 @@ export class CloudManager extends EventTarget {
     this.engine.initialize(window.LaStorage.getState());
     this.initialized = true;
 
-    window.addEventListener("las-state-changed", () => {
-      if (this.applyingMergedState) return;
+    window.addEventListener("las-state-changed", event => {
+      if (event.detail?.source === "cloud") return;
       this.engine.markLocalChanges(window.LaStorage.getState());
-      if (this.preferences.autoSync && this.auth.isConnected) {
-        this.#scheduleAutomaticSync();
+      if (this.preferences.autoSync && this.auth.isConnected) this.#scheduleAutomaticSync();
+    });
+
+    window.addEventListener("online", () => {
+      if (this.auth.isConnected && this.preferences.autoSync) this.#scheduleAutomaticSync(200);
+    });
+    window.addEventListener("offline", () => {
+      if (this.auth.isConnected) {
+        this.#setPhase("offline", "Нет интернета. Изменения сохраняются локально и синхронизируются позже.");
       }
     });
 
-    this.auth.addEventListener("change", () => {
-      if (
-        !this.auth.isConnected &&
-        this.preferences.previouslyConnected &&
-        this.phase === "connected"
-      ) {
-        this.#setPhase(
-          "authRequired",
-          "Сессия Google истекла. Подключите аккаунт повторно для следующей синхронизации.",
-        );
-      } else {
-        this.#emit();
-      }
-    });
+    this.auth.addEventListener("change", () => this.#emit());
+    await this.auth.prepare();
 
-    if (this.preferences.previouslyConnected && this.auth.cachedAccount) {
-      this.#setPhase(
-        "authRequired",
-        "Резервная копия подключена. Для синхронизации подтвердите Google-аккаунт.",
-      );
+    if (!this.auth.ready) {
+      this.#setPhase("error", this.auth.snapshot().error?.message || "Не настроен сервер синхронизации");
+    } else if (this.auth.isConnected && navigator.onLine) {
+      try {
+        await this.syncNow({ reason: "startup" });
+      } catch (_) {
+        // syncNow already updates the visible status.
+      }
+    } else if (this.auth.isConnected) {
+      this.#setPhase("offline", "Аккаунт подключён. Синхронизация продолжится после появления интернета.");
+    } else if (this.preferences.previouslyConnected || this.auth.cachedAccount) {
+      this.#setPhase("authRequired", "После обновления нужно один раз подключить Google заново.");
     } else {
       this.#setPhase("local", "Данные хранятся только на этом устройстве");
     }
@@ -99,9 +103,9 @@ export class CloudManager extends EventTarget {
   }
 
   async connect() {
-    this.#setPhase("connecting", "Открываем вход Google…");
+    this.#setPhase("connecting", "Открываем безопасный вход Google…");
     try {
-      await this.auth.connect({ prompt: "select_account" });
+      await this.auth.connect();
       this.preferences.previouslyConnected = true;
       this.#savePreferences();
       return await this.syncNow({ reason: "connect" });
@@ -116,108 +120,112 @@ export class CloudManager extends EventTarget {
     await this.auth.disconnect({ forgetAccount: true });
     this.preferences.previouslyConnected = false;
     this.#savePreferences();
-    this.#setPhase(
-      "local",
-      "Google отключён. Локальные данные сохранены и продолжат работать.",
-    );
+    this.#setPhase("local", "Google отключён на этом устройстве. Локальные данные сохранены.");
+  }
+
+  async revokeAccess() {
+    window.clearTimeout(this.autoSyncTimer);
+    await this.auth.revokeAccess();
+    this.preferences.previouslyConnected = false;
+    this.#savePreferences();
+    this.#setPhase("local", "Доступ Google отозван на всех устройствах. Локальные данные сохранены.");
+  }
+
+
+  async deleteCloudData() {
+    window.clearTimeout(this.autoSyncTimer);
+    const result = await this.auth.deleteCloudData();
+    this.preferences.previouslyConnected = false;
+    this.#savePreferences();
+    this.#setPhase("local", "Облачная копия и доступ Google удалены. Локальные данные сохранены.");
+    return result;
   }
 
   setAutoSync(enabled) {
     this.preferences.autoSync = Boolean(enabled);
     this.#savePreferences();
     this.#emit();
-    if (this.preferences.autoSync && this.auth.isConnected) {
-      this.#scheduleAutomaticSync();
-    }
+    if (this.preferences.autoSync && this.auth.isConnected) this.#scheduleAutomaticSync();
   }
 
-  #scheduleAutomaticSync() {
+  #scheduleAutomaticSync(delay = null) {
     window.clearTimeout(this.autoSyncTimer);
-    const delay = Number(window.LAS_CONFIG?.AUTO_SYNC_DEBOUNCE_MS) || 1200;
+    const configuredDelay = Number(window.LAS_CONFIG?.AUTO_SYNC_DEBOUNCE_MS) || 1200;
+    const timeout = delay ?? configuredDelay;
     this.autoSyncTimer = window.setTimeout(() => {
       this.syncNow({ reason: "automatic" }).catch(error => {
-        console.warn("Automatic Drive sync failed", error);
+        if (error?.code !== "NETWORK_ERROR") console.warn("Automatic sync failed", error);
       });
-    }, delay);
+    }, timeout);
   }
 
   async syncNow({ reason = "manual" } = {}) {
     if (this.syncPromise) return this.syncPromise;
     if (!this.auth.isConnected) {
-      const error = new GoogleAuthError(
-        "Нажмите «Подключить Google», чтобы обновить доступ.",
-        "AUTH_REQUIRED",
-      );
+      const error = new GoogleAuthError("Подключите Google для синхронизации.", "AUTH_REQUIRED");
+      this.#handleError(error);
+      throw error;
+    }
+    if (!navigator.onLine) {
+      const error = new DriveApiError("Нет интернета", "NETWORK_ERROR");
       this.#handleError(error);
       throw error;
     }
 
-    this.#setPhase(
-      "syncing",
-      reason === "connect" ? "Объединяем локальные данные с Google Drive…" : "Синхронизация…",
-    );
-
-    this.syncPromise = this.engine
-      .synchronize(window.LaStorage.getState())
-      .then(async result => {
-        const currentState = window.LaStorage.getState();
-        if (!sameState(currentState, result.state)) {
-          this.applyingMergedState = true;
-          try {
-            await window.LaStorage.replaceState(result.state);
-          } finally {
-            this.applyingMergedState = false;
-          }
-        }
-
-        const account = this.auth.cachedAccount;
-        this.#setPhase(
-          "connected",
-          account?.email
-            ? `Синхронизировано с ${account.email}`
-            : "Синхронизировано с Google Drive",
-        );
-        return result;
-      })
-      .catch(error => {
-        this.#handleError(error);
-        throw error;
-      })
-      .finally(() => {
-        this.syncPromise = null;
-      });
-
+    this.syncPromise = this.#performSync(reason).finally(() => {
+      this.syncPromise = null;
+    });
     return this.syncPromise;
   }
 
+  async #performSync(reason) {
+    this.#setPhase("syncing", reason === "automatic" ? "Сохраняем изменения…" : "Синхронизируем данные…");
+    try {
+      let result = null;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        result = await this.engine.synchronize(window.LaStorage.getState());
+        if (!result.stale) break;
+      }
+
+      if (result?.stale) {
+        this.#scheduleAutomaticSync(150);
+        this.#setPhase("connected", "Новые изменения сохранены локально и будут синхронизированы следом.");
+        return result;
+      }
+
+      if (!sameState(result.state, window.LaStorage.getState())) {
+        await window.LaStorage.replaceState(result.state);
+      }
+      if (this.engine.hasChangesSince(result.changeVersion)) this.#scheduleAutomaticSync(150);
+
+      const message = result.recoveredCorruptBackup
+        ? "Повреждённая копия сохранена отдельно, создана новая исправная копия."
+        : "Данные защищены и синхронизированы через Google Drive";
+      this.#setPhase("connected", message);
+      return result;
+    } catch (error) {
+      this.#handleError(error);
+      throw error;
+    }
+  }
+
   #handleError(error) {
-    const authRequired =
-      error?.code === "AUTH_REQUIRED" ||
-      (error instanceof DriveApiError && error.status === 401);
-    if (authRequired) {
-      if (this.auth.isConnected) this.auth.invalidate();
-      this.#setPhase(
-        "authRequired",
-        "Доступ Google истёк. Подключите аккаунт повторно — локальные данные не потеряны.",
-        error,
-      );
+    const code = error?.code || "UNKNOWN";
+    if (["AUTH_REQUIRED", "GOOGLE_REAUTH_REQUIRED"].includes(code)) {
+      this.auth.invalidate({ forgetAccount: false });
+      this.#setPhase("authRequired", error.message || "Подключите Google повторно", error);
+    } else if (code === "NETWORK_ERROR") {
+      this.#setPhase("offline", "Нет связи. Изменения сохранены локально и будут отправлены позже.", error);
     } else {
-      this.#setPhase(
-        "error",
-        error?.message || "Не удалось синхронизировать данные",
-        error,
-      );
+      this.#setPhase("error", error?.message || "Ошибка синхронизации", error);
     }
   }
 
   snapshot() {
     return {
-      initialized: this.initialized,
       phase: this.phase,
       message: this.message,
-      error: this.lastError
-        ? { message: this.lastError.message, code: this.lastError.code || "ERROR" }
-        : null,
+      lastError: this.lastError,
       autoSync: this.preferences.autoSync,
       previouslyConnected: this.preferences.previouslyConnected,
       auth: this.auth.snapshot(),
@@ -226,6 +234,8 @@ export class CloudManager extends EventTarget {
   }
 }
 
+let singleton = null;
 export function createCloudManager(defaults) {
-  return new CloudManager(defaults);
+  if (!singleton) singleton = new CloudManager(defaults);
+  return singleton;
 }

@@ -1,0 +1,44 @@
+name: Check cloud sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "server/**"
+      - ".github/workflows/cloud.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - "server/**"
+      - ".github/workflows/cloud.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: server/package.json
+
+      - name: Install backend dependencies
+        working-directory: server
+        run: npm install --no-audit --no-fund
+
+      - name: Check backend
+        working-directory: server
+        run: npm run check
+
+      - name: Run backend tests
+        working-directory: server
+        run: npm test
+
+      - name: Check browser modules
+        run: find web -type f -name '*.js' -print0 | xargs -0 -n1 node --check

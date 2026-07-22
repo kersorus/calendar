@@ -1,7 +1,9 @@
-const CACHE_NAME = "las-salary-v1.0.0-cloud";
+const CACHE_NAME = "las-salary-v1.2.1-gis-code";
 const APP_SHELL = [
   "./",
   "./index.html",
+  "./privacy.html",
+  "./terms.html",
   "./styles.css",
   "./cloud.css",
   "./config.js",
@@ -46,30 +48,27 @@ self.addEventListener("fetch", event => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  if (request.mode === "navigate") {
+  const networkFirst = request.mode === "navigate"
+    || ["script", "style", "worker"].includes(request.destination)
+    || url.pathname.endsWith(".html")
+    || url.pathname.endsWith(".webmanifest");
+
+  if (networkFirst) {
     event.respondWith(
       fetch(request)
         .then(response => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put("./index.html", copy));
+          if (response.ok) caches.open(CACHE_NAME).then(cache => cache.put(request, response.clone()));
           return response;
         })
-        .catch(() => caches.match("./index.html")),
+        .catch(async () => (await caches.match(request)) || caches.match("./index.html")),
     );
     return;
   }
 
   event.respondWith(
-    caches.match(request).then(cached => {
-      const refresh = fetch(request)
-        .then(response => {
-          if (response.ok) {
-            caches.open(CACHE_NAME).then(cache => cache.put(request, response.clone()));
-          }
-          return response;
-        })
-        .catch(() => cached);
-      return cached || refresh;
-    }),
+    caches.match(request).then(cached => cached || fetch(request).then(response => {
+      if (response.ok) caches.open(CACHE_NAME).then(cache => cache.put(request, response.clone()));
+      return response;
+    })),
   );
 });

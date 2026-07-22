@@ -1,100 +1,137 @@
-# Calendar / La$
+# Calendar
 
-В репозитории находятся два Android-приложения и PWA-версия приложения «Зарплата»:
+Приложения для учёта рабочего времени, смен и ориентировочного расчёта зарплаты.
 
-- `timecalendar` — учёт часов и целей;
-- `warehouse` — Android-приложение расчёта зарплаты;
-- `web` — устанавливаемое PWA с офлайн-режимом и синхронизацией через Google Drive.
+В репозитории находятся:
 
-## Что реализовано в PWA
+- Android-приложение с вариантами `timecalendar` и `warehouse`;
+- устанавливаемая PWA в каталоге `web`;
+- сервер защищённой синхронизации в каталоге `server`.
 
-- локальная база IndexedDB и работа без интернета;
-- вход через Google Identity Services;
-- резервная копия в закрытом пространстве `appDataFolder` Google Drive;
-- синхронизация смен и настроек между устройствами;
-- объединение изменений по каждой дате смены вместо слепой замены всей базы;
-- распространение удалений между устройствами с помощью временных меток;
-- автоматическая синхронизация после локальных изменений, пока действует Google-сессия;
-- ручной экспорт и импорт JSON оставлены как независимый запасной вариант;
-- токен Google хранится только в памяти вкладки и не записывается в IndexedDB или `localStorage`.
+## Как работает синхронизация
 
-## Настройка Google OAuth
+PWA всегда сохраняет рабочую копию локально и продолжает работать без интернета. После подключения Google резервная копия хранится в закрытом пространстве `appDataFolder` Google Drive.
 
-Для работы входа приложение должно открываться по HTTPS или на `localhost`. Запуск через `file://` для OAuth не подходит.
-
-1. Создайте или выберите проект в Google Cloud Console.
-2. Включите **Google Drive API**.
-3. Настройте OAuth consent screen.
-4. Создайте OAuth Client ID типа **Web application**.
-5. Добавьте адрес развёрнутого приложения в **Authorized JavaScript origins**. Для GitHub Pages это обычно `https://kersorus.github.io`.
-6. Вставьте Client ID в `web/config.js`:
-
-```js
-GOOGLE_CLIENT_ID: "ваш-client-id.apps.googleusercontent.com"
+```text
+PWA ── Google Identity Services ── одноразовый OAuth code
+ │                                      │
+ └────────────── Cloud Run API ◄────────┘
+                    │       │
+               Firestore   Google Drive appDataFolder
 ```
 
-Client ID является публичным идентификатором браузерного приложения. Client Secret в репозиторий добавлять нельзя.
+Браузер не получает Google access token или refresh token. Одноразовый код передаётся backend, refresh token шифруется AES-256-GCM и хранится в Firestore. На устройстве остаётся только случайный идентификатор сессии приложения.
 
-Если OAuth-приложение находится в режиме Testing, добавьте нужные Google-аккаунты в список Test users.
+При обмене независимо сравниваются:
 
-## Как устроена синхронизация
+- настройки расчёта;
+- параметры графика;
+- каждая смена по дате;
+- отметки об удалении смен.
 
-В Drive создаётся один файл `las_salary_backup.json` в `appDataFolder`. Эта папка не показывается пользователю среди обычных файлов Drive и доступна только приложению, которое её создало.
+Параллельная запись одного аккаунта блокируется короткой серверной арендой. Если локальные данные изменились во время сетевого запроса, устаревший ответ не применяется и синхронизация повторяется. Новый телефон с настройками по умолчанию сначала загружает облачную копию и не может затереть её пустыми данными.
 
-Облачный формат имеет версию 3. Для настроек, графика и каждой даты смены хранится собственное время изменения. При синхронизации приложение:
+## Структура
 
-1. читает локальное состояние;
-2. загружает копию из Drive;
-3. выбирает более новое значение для каждого раздела и каждой даты;
-4. сохраняет объединённое состояние локально;
-5. отправляет объединённую копию обратно в Drive.
+```text
+app/                         Android-код и ресурсы
+web/
+  app.js                     запуск PWA и единая точка изменения состояния
+  storage.js                 IndexedDB, импорт и экспорт JSON
+  migration.js               проверка и миграция старых форматов
+  google_auth.js             GIS popup code flow и серверная сессия
+  drive_api.js               запросы к API синхронизации
+  drive_sync.js              локальные версии записей и подготовка снимка
+  cloud_manager.js           автосинхронизация и обработка состояний
+  cloud_ui.js                интерфейс подключения и управления копией
+  privacy.html               политика конфиденциальности
+  terms.html                 условия использования
+server/
+  src/app.js                 HTTP API, CORS, CSRF-защита и ошибки
+  src/auth-service.js        обмен OAuth code и обновление Google-токенов
+  src/drive-service.js       чтение, объединение и запись копии в Drive
+  src/store.js               пользователи, сессии и блокировки Firestore
+  src/cloud-record.js        модель данных и разрешение конфликтов
+  src/crypto.js              шифрование refresh token и хеширование сессий
+  test/                      тесты объединения и гонок синхронизации
+.github/workflows/
+  cloud.yml                  проверки frontend и backend
+  pages.yml                  публикация каталога web в GitHub Pages
+```
 
-Старые локальные JSON-копии и ранние облачные снимки мигрируют в новый формат автоматически.
+## Настройка PWA
+
+Публичные параметры находятся в `web/config.js`:
+
+```js
+window.LAS_CONFIG = Object.freeze({
+  API_BASE_URL: "https://SERVICE-URL.run.app",
+  GOOGLE_CLIENT_ID: "000000000000-example.apps.googleusercontent.com",
+  CLOUD_SCHEMA_VERSION: 3,
+  AUTO_SYNC_DEBOUNCE_MS: 1200,
+});
+```
+
+`GOOGLE_CLIENT_ID` не является секретом. Client Secret и ключ шифрования в `web` добавлять нельзя.
+
+Для OAuth-клиента типа **Web application** укажите Authorized JavaScript origin сайта, например:
+
+```text
+https://kersorus.github.io
+```
+
+Для popup Code Model отдельный OAuth redirect URI не требуется. Backend при обмене кода использует точный origin страницы.
+
+GitHub Actions публикует содержимое `web/` после push в `main`. В настройках репозитория Pages должен быть выбран источник **GitHub Actions**.
+
+## Настройка backend
+
+Обязательные переменные окружения:
+
+| Переменная | Назначение |
+|---|---|
+| `GOOGLE_CLIENT_ID` | тот же OAuth Client ID типа Web application, что указан в PWA |
+| `GOOGLE_CLIENT_SECRET` | OAuth Client Secret |
+| `TOKEN_ENCRYPTION_KEY` | 32 случайных байта в Base64 для AES-256-GCM |
+| `ALLOWED_ORIGINS` | разрешённые origin PWA через запятую |
+
+Дополнительные параметры перечислены в `server/.env.example`.
+
+Для Cloud Run передавайте `GOOGLE_CLIENT_SECRET` и `TOKEN_ENCRYPTION_KEY` через Secret Manager. Сервисному аккаунту нужны роли для работы с Firestore и чтения этих двух секретов. Ключ `TOKEN_ENCRYPTION_KEY` нельзя заменять после появления пользователей: без прежнего ключа сохранённые refresh token невозможно расшифровать.
+
+После первого подключения backend автоматически получает новые короткоживущие access token через refresh token. Повторный вход обычно требуется только после явного выхода или отзыва доступа, очистки локальной сессии, длительного бездействия либо аннулирования разрешения Google.
+
+## Управление данными
+
+- **Отключить устройство** — удаляет только сессию текущего браузера.
+- **Отозвать доступ** — удаляет refresh token и завершает сессии на всех устройствах; резервная копия остаётся в Drive.
+- **Удалить облачную копию** — удаляет файлы приложения из `appDataFolder`, refresh token и все серверные сессии. Локальная база текущего устройства сохраняется.
+
+Для важных данных дополнительно используйте ручной экспорт JSON.
+
+## Проверки
+
+```bash
+cd server
+npm install --no-audit --no-fund
+npm run check
+npm test
+
+cd ..
+find web -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+```
+
+Android-сборка:
+
+```bash
+./gradlew assembleTimecalendarDebug assembleWarehouseDebug
+```
 
 ## Локальный запуск PWA
-
-Из корня репозитория:
 
 ```bash
 cd web
 python3 -m http.server 8080
 ```
 
-Откройте `http://localhost:8080`.
-
-## Сборка Android
-
-Оба APK:
-
-```bash
-./gradlew assembleTimecalendarDebug assembleWarehouseDebug
-```
-
-Только приложение «Зарплата»:
-
-```bash
-./gradlew assembleWarehouseDebug
-```
-
-APK:
-
-```text
-app/build/outputs/apk/warehouse/debug/app-warehouse-debug.apk
-```
-
-## Структура облачного слоя
-
-```text
-web/
-├── google_auth.js    # Google Identity Services, токен и профиль
-├── drive_api.js      # REST-запросы к Google Drive API
-├── drive_sync.js     # миграция, объединение и облачный формат
-├── cloud_manager.js  # состояние подключения и автосинхронизация
-├── cloud_ui.js       # элементы меню, onboarding и уведомления
-├── migration.js      # нормализация локальных и старых облачных данных
-└── config.js         # публичная конфигурация OAuth
-```
-
-## Приватность
-
-Без подключения Google данные остаются только на устройстве. После подключения в Drive отправляются только настройки приложения, график и введённые смены. Доступ запрашивается исключительно к закрытой папке данных этого приложения, а не ко всему содержимому Google Drive.
+Для локальной проверки добавьте `http://localhost:8080` одновременно в `ALLOWED_ORIGINS` backend и в Authorized JavaScript origins OAuth-клиента.

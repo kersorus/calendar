@@ -1,17 +1,25 @@
 import { createCloudManager } from "./cloud_manager.js";
 
-const ONBOARDING_KEY = "las_cloud_onboarding_done_v1";
+const ONBOARDING_KEY = "las_cloud_onboarding_v2";
 
-const $ = id => document.getElementById(id);
+function $(id) {
+  return document.getElementById(id);
+}
 
 function formatDateTime(value) {
-  if (!value) return "Ещё не синхронизировалось";
+  if (!value) return "ещё не было";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Ещё не синхронизировалось";
+  if (Number.isNaN(date.getTime())) return "неизвестно";
   return new Intl.DateTimeFormat("ru-RU", {
     dateStyle: "short",
     timeStyle: "short",
   }).format(date);
+}
+
+function setButtonBusy(button, busy) {
+  if (!button) return;
+  button.disabled = busy;
+  button.setAttribute("aria-busy", String(busy));
 }
 
 function showToast(message, kind = "info") {
@@ -23,13 +31,7 @@ function showToast(message, kind = "info") {
   window.clearTimeout(showToast.timer);
   showToast.timer = window.setTimeout(() => {
     toast.hidden = true;
-  }, 4200);
-}
-
-function setButtonBusy(button, busy) {
-  if (!button) return;
-  button.disabled = busy;
-  button.setAttribute("aria-busy", String(Boolean(busy)));
+  }, 3800);
 }
 
 function render(snapshot) {
@@ -38,6 +40,8 @@ function render(snapshot) {
   const account = $("cloudAccount");
   const connect = $("connectGoogleButton");
   const disconnect = $("disconnectGoogleButton");
+  const revoke = $("revokeGoogleButton");
+  const deleteCloudData = $("deleteCloudDataButton");
   const sync = $("syncNowButton");
   const auto = $("autoSyncInput");
   const lastSync = $("cloudLastSync");
@@ -50,6 +54,7 @@ function render(snapshot) {
       connecting: "Вход…",
       syncing: "Синхронизация…",
       connected: "Защищено",
+      offline: "Офлайн",
       authRequired: "Нужен вход",
       error: "Ошибка",
     };
@@ -68,25 +73,29 @@ function render(snapshot) {
 
   if (connect) {
     connect.hidden = connected;
-    connect.textContent = !snapshot.auth.ready
-      ? "Загрузка Google…"
-      : snapshot.previouslyConnected
-        ? "Подключить Google снова"
-        : "Подключить Google";
+    connect.textContent = snapshot.previouslyConnected || snapshot.auth.account
+      ? "Подключить Google снова"
+      : "Подключить Google";
     setButtonBusy(connect, busy || !snapshot.auth.ready);
   }
   if (disconnect) {
-    disconnect.hidden = !connected && !snapshot.previouslyConnected;
+    disconnect.hidden = !connected;
     setButtonBusy(disconnect, busy);
   }
+  if (revoke) {
+    revoke.hidden = !connected;
+    setButtonBusy(revoke, busy);
+  }
+  if (deleteCloudData) {
+    deleteCloudData.hidden = !connected;
+    setButtonBusy(deleteCloudData, busy);
+  }
   if (sync) {
-    sync.disabled = !connected || busy;
+    sync.disabled = !connected || busy || !navigator.onLine;
     sync.setAttribute("aria-busy", String(snapshot.phase === "syncing"));
   }
   if (auto) auto.checked = snapshot.autoSync;
-  if (lastSync) {
-    lastSync.textContent = `Последняя синхронизация: ${formatDateTime(snapshot.sync.lastSyncAt)}`;
-  }
+  if (lastSync) lastSync.textContent = `Последняя синхронизация: ${formatDateTime(snapshot.sync.lastSyncAt)}`;
 }
 
 export async function initCloudUi(defaults) {
@@ -99,11 +108,9 @@ export async function initCloudUi(defaults) {
   $("connectGoogleButton")?.addEventListener("click", async () => {
     try {
       await manager.connect();
-      showToast("Данные сохранены в Google Drive", "success");
+      showToast("Аккаунт подключён, данные синхронизированы", "success");
     } catch (error) {
-      if (!["popup_closed", "popup_failed_to_open"].includes(error?.code)) {
-        showToast(error?.message || "Не удалось подключить Google", "error");
-      }
+      if (error?.code !== "POPUP_CLOSED") showToast(error?.message || "Не удалось подключить Google", "error");
     }
   });
 
@@ -117,20 +124,37 @@ export async function initCloudUi(defaults) {
   });
 
   $("disconnectGoogleButton")?.addEventListener("click", async () => {
-    if (!confirm("Отключить Google? Данные на этом устройстве останутся.")) return;
+    if (!confirm("Отключить Google только на этом устройстве? Локальные данные останутся.")) return;
     await manager.disconnect();
-    showToast("Google отключён. Работа продолжается локально.");
+    showToast("Google отключён на этом устройстве");
   });
 
-  $("autoSyncInput")?.addEventListener("change", event => {
-    manager.setAutoSync(event.target.checked);
+  $("revokeGoogleButton")?.addEventListener("click", async () => {
+    if (!confirm("Отозвать доступ Google на всех устройствах? Облачная копия в Drive останется.")) return;
+    try {
+      await manager.revokeAccess();
+      showToast("Доступ Google отозван", "success");
+    } catch (error) {
+      showToast(error?.message || "Не удалось отозвать доступ", "error");
+    }
   });
+
+
+  $("deleteCloudDataButton")?.addEventListener("click", async () => {
+    if (!confirm("Удалить облачную копию, серверные ключи и все сессии? Локальные данные на этом устройстве останутся.")) return;
+    try {
+      const result = await manager.deleteCloudData();
+      showToast(`Облачные данные удалены${result.deletedFiles ? `: файлов ${result.deletedFiles}` : ""}`, "success");
+    } catch (error) {
+      showToast(error?.message || "Не удалось удалить облачные данные", "error");
+    }
+  });
+
+  $("autoSyncInput")?.addEventListener("change", event => manager.setAutoSync(event.target.checked));
 
   const onboarding = $("cloudSetupDialog");
   const onboardingDone = localStorage.getItem(ONBOARDING_KEY) === "1";
-  if (!onboardingDone && onboarding?.showModal) {
-    window.setTimeout(() => onboarding.showModal(), 250);
-  }
+  if (!onboardingDone && onboarding?.showModal) window.setTimeout(() => onboarding.showModal(), 250);
 
   $("cloudSetupLaterButton")?.addEventListener("click", () => {
     localStorage.setItem(ONBOARDING_KEY, "1");

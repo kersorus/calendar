@@ -1,17 +1,9 @@
 /**
- * Public browser configuration.
- * OAuth client IDs are not secrets; never put a client secret in a PWA.
+ * Публичная конфигурация PWA. Секретов здесь быть не должно.
  */
 window.LAS_CONFIG = Object.freeze({
-  GOOGLE_CLIENT_ID:
-    "446294536354-ako75ioe9j7ssjpulsr6g0996ftifmr1.apps.googleusercontent.com",
-  GOOGLE_SCOPES: [
-    "https://www.googleapis.com/auth/drive.appdata",
-    "openid",
-    "email",
-    "profile",
-  ].join(" "),
-  DRIVE_BACKUP_FILE_NAME: "las_salary_backup.json",
+  API_BASE_URL: "https://YOUR-CLOUD-RUN-SERVICE.run.app",
+  GOOGLE_CLIENT_ID: "YOUR-WEB-CLIENT-ID.apps.googleusercontent.com",
   CLOUD_SCHEMA_VERSION: 3,
   AUTO_SYNC_DEBOUNCE_MS: 1200,
 });

@@ -7,6 +7,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="La$">
   <meta name="description" content="Календарь смен, расчёт зарплаты и защищённая синхронизация через Google Drive">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' https://accounts.google.com/gsi/style; img-src 'self' data:; connect-src 'self' https://*.run.app http://localhost:* https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>Зарплата La$</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -33,6 +35,12 @@
     <div id="modeHint" class="mode-hint"></div>
     <section id="calendar" class="calendar"></section>
     <section id="payments" class="payments"></section>
+
+    <footer class="app-footer">
+      <p>La$ — личный календарь смен с ориентировочным расчётом зарплаты и резервной копией в Google Drive.</p>
+      <a href="./privacy.html">Конфиденциальность</a>
+      <a href="./terms.html">Условия использования</a>
+    </footer>
   </div>
 
   <dialog id="menuDialog">
@@ -51,14 +59,16 @@
         <div class="cloud-actions">
           <button id="connectGoogleButton" type="button">Подключить Google</button>
           <button id="syncNowButton" type="button" disabled>Синхронизировать</button>
-          <button id="disconnectGoogleButton" type="button" hidden>Отключить</button>
+          <button id="disconnectGoogleButton" type="button" hidden>Отключить устройство</button>
+          <button id="revokeGoogleButton" class="danger-button" type="button" hidden>Отозвать доступ</button>
+          <button id="deleteCloudDataButton" class="danger-button" type="button" hidden>Удалить облачную копию</button>
         </div>
         <label class="cloud-toggle">
           <input id="autoSyncInput" type="checkbox" checked>
           Автосинхронизация после изменений
         </label>
         <p id="cloudLastSync" class="cloud-last-sync">Последняя синхронизация: ещё не было</p>
-        <p class="cloud-note">Копия скрыта от других приложений и доступна только La$.</p>
+        <p class="cloud-note">Google-ключ хранится только на сервере в зашифрованном виде. На устройстве остаётся обезличенный ключ сессии.</p>
       </section>
 
       <button id="exportButton" type="button">Экспорт JSON</button>
@@ -68,6 +78,10 @@
       <div id="storageStatus" class="storage-status"></div>
       <button id="enableAutoBackupButton" type="button">Включить автосохранение в файл</button>
       <button id="disableAutoBackupButton" type="button" hidden>Отключить автосохранение</button>
+      <nav class="legal-links" aria-label="Документы">
+        <a href="./privacy.html" target="_blank" rel="noopener">Конфиденциальность</a>
+        <a href="./terms.html" target="_blank" rel="noopener">Условия использования</a>
+      </nav>
       <button value="close">Закрыть</button>
     </form>
   </dialog>
@@ -136,7 +150,8 @@
       <ul>
         <li>локальная работа остаётся доступной без интернета;</li>
         <li>при входе с другого устройства данные объединяются;</li>
-        <li>резервная копия хранится в закрытой папке приложения.</li>
+        <li>резервная копия хранится в закрытой папке приложения;</li>
+        <li>повторный вход не требуется, пока вы пользуетесь приложением и не отозвали доступ.</li>
       </ul>
       <button id="cloudSetupConnectButton" class="primary-button" type="button">Подключить Google</button>
       <button id="cloudSetupLaterButton" type="button">Пока работать локально</button>

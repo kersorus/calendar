@@ -1,250 +1,307 @@
-const ACCOUNT_STORAGE_KEY = "las_google_account_v1";
+const SESSION_STORAGE_KEY = "las_cloud_session_v1";
+const ACCOUNT_STORAGE_KEY = "las_cloud_account_v2";
+const GOOGLE_SCOPES = [
+  "openid",
+  "email",
+  "profile",
+  "https://www.googleapis.com/auth/drive.appdata",
+].join(" ");
 
 export class GoogleAuthError extends Error {
   constructor(message, code = "AUTH_ERROR", cause = null) {
-    super(message);
+    super(message, { cause });
     this.name = "GoogleAuthError";
     this.code = code;
-    this.cause = cause;
   }
 }
 
 function readJson(key, fallback = null) {
   try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
+    const value = localStorage.getItem(key);
+    return value ? JSON.parse(value) : fallback;
   } catch (_) {
     return fallback;
   }
 }
 
-function waitForGoogleIdentity(timeoutMs = 12000) {
-  if (window.google?.accounts?.oauth2) return Promise.resolve();
+function normalizedApiBase(config) {
+  const raw = String(config.API_BASE_URL || "").trim().replace(/\/$/, "");
+  if (!raw || raw.includes("YOUR-CLOUD-RUN-SERVICE")) {
+    throw new GoogleAuthError(
+      "Укажите адрес Cloud Run в web/config.js.",
+      "API_URL_MISSING",
+    );
+  }
+  const url = new URL(raw);
+  if (url.protocol !== "https:" && url.hostname !== "localhost") {
+    throw new GoogleAuthError("Сервер синхронизации должен работать по HTTPS.", "API_URL_INVALID");
+  }
+  return url;
+}
 
+function normalizedClientId(config) {
+  const value = String(config.GOOGLE_CLIENT_ID || "").trim();
+  if (!value || value.includes("YOUR-WEB-CLIENT-ID")) {
+    throw new GoogleAuthError(
+      "Укажите Web OAuth Client ID в web/config.js.",
+      "GOOGLE_CLIENT_ID_MISSING",
+    );
+  }
+  if (!value.endsWith(".apps.googleusercontent.com")) {
+    throw new GoogleAuthError("Некорректный Google OAuth Client ID.", "GOOGLE_CLIENT_ID_INVALID");
+  }
+  return value;
+}
+
+async function responseError(response) {
+  try {
+    const body = await response.json();
+    return new GoogleAuthError(
+      body?.error?.message || `Сервер вернул HTTP ${response.status}`,
+      body?.error?.code || (response.status === 401 ? "AUTH_REQUIRED" : "API_ERROR"),
+    );
+  } catch (_) {
+    return new GoogleAuthError(
+      `Сервер вернул HTTP ${response.status}`,
+      response.status === 401 ? "AUTH_REQUIRED" : "API_ERROR",
+    );
+  }
+}
+
+function waitForGoogleIdentity(timeoutMs = 15_000) {
+  if (globalThis.google?.accounts?.oauth2?.initCodeClient) return Promise.resolve();
   return new Promise((resolve, reject) => {
-    const startedAt = Date.now();
+    const deadline = Date.now() + timeoutMs;
     const timer = window.setInterval(() => {
-      if (window.google?.accounts?.oauth2) {
+      if (globalThis.google?.accounts?.oauth2?.initCodeClient) {
         window.clearInterval(timer);
         resolve();
-      } else if (Date.now() - startedAt >= timeoutMs) {
+      } else if (Date.now() >= deadline) {
         window.clearInterval(timer);
-        reject(
-          new GoogleAuthError(
-            "Не удалось загрузить Google Identity Services. Проверьте интернет и блокировщик рекламы.",
-            "GIS_UNAVAILABLE",
-          ),
-        );
+        reject(new GoogleAuthError(
+          "Не удалось загрузить библиотеку входа Google. Проверьте блокировщики и соединение.",
+          "GOOGLE_LIBRARY_UNAVAILABLE",
+        ));
       }
     }, 100);
   });
 }
 
-async function fetchProfile(accessToken) {
-  const response = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-
-  if (!response.ok) {
-    throw new GoogleAuthError(
-      `Google вернул ошибку профиля: ${response.status}`,
-      "PROFILE_ERROR",
+function popupError(error) {
+  const type = error?.type || "unknown";
+  if (type === "popup_closed") {
+    return new GoogleAuthError("Окно входа было закрыто", "POPUP_CLOSED");
+  }
+  if (type === "popup_failed_to_open") {
+    return new GoogleAuthError(
+      "Браузер заблокировал окно входа. Разрешите всплывающие окна для сайта.",
+      "POPUP_BLOCKED",
     );
   }
-
-  const profile = await response.json();
-  return {
-    sub: profile.sub || "",
-    email: profile.email || "",
-    name: profile.name || profile.email || "Google",
-    picture: profile.picture || "",
-  };
+  return new GoogleAuthError("Не удалось открыть вход Google", "GOOGLE_POPUP_ERROR");
 }
 
 export class GoogleAuth extends EventTarget {
   constructor(config = window.LAS_CONFIG || {}) {
     super();
-    this.clientId = config.GOOGLE_CLIENT_ID || "";
-    this.scopes = config.GOOGLE_SCOPES || "";
-    this.tokenClient = null;
-    this.accessToken = "";
-    this.expiresAt = 0;
-    this.account = readJson(ACCOUNT_STORAGE_KEY, null);
-    this.pendingRequest = null;
-    this.expiryTimer = 0;
-    this.ready = Boolean(window.google?.accounts?.oauth2);
+    this.config = config;
+    this.sessionToken = "";
+    this.account = readJson(
+      ACCOUNT_STORAGE_KEY,
+      readJson("las_google_account_v1", null),
+    );
+    this.ready = false;
+    this.onlineValidated = false;
     this.readyError = null;
-    this.preparePromise = this.ready
-      ? Promise.resolve(true)
-      : this.prepare().catch(error => {
-          this.readyError = error;
-          return false;
-        });
+    this.pendingConnect = null;
+
+    try {
+      this.apiUrl = normalizedApiBase(config);
+      this.clientId = normalizedClientId(config);
+      this.sessionToken = localStorage.getItem(SESSION_STORAGE_KEY) || "";
+      this.ready = true;
+    } catch (error) {
+      this.readyError = error;
+    }
   }
 
   get cachedAccount() {
     return this.account;
   }
 
-  async prepare() {
-    try {
-      await waitForGoogleIdentity();
-      this.ready = true;
-      this.readyError = null;
-      this.dispatchEvent(new CustomEvent("change", { detail: this.snapshot() }));
-      return true;
-    } catch (error) {
-      this.ready = false;
-      this.readyError = error;
-      this.dispatchEvent(new CustomEvent("change", { detail: this.snapshot() }));
-      throw error;
-    }
+  get apiBaseUrl() {
+    return this.apiUrl?.toString().replace(/\/$/, "") || "";
   }
 
   get isConnected() {
-    return Boolean(this.accessToken) && Date.now() < this.expiresAt - 30_000;
+    return Boolean(this.sessionToken);
   }
 
-  getAccessToken() {
-    if (!this.isConnected) {
-      throw new GoogleAuthError(
-        "Сессия Google истекла. Нажмите «Подключить Google» ещё раз.",
-        "AUTH_REQUIRED",
-      );
+  getSessionToken() {
+    if (!this.sessionToken) {
+      throw new GoogleAuthError("Подключите Google для синхронизации.", "AUTH_REQUIRED");
     }
-    return this.accessToken;
+    return this.sessionToken;
   }
 
-  async connect({ prompt = "select_account" } = {}) {
-    if (!this.clientId || this.clientId.includes("YOUR_")) {
-      throw new GoogleAuthError(
-        "Укажите OAuth Client ID в web/config.js.",
-        "CLIENT_ID_MISSING",
-      );
+  endpoint(path) {
+    if (!this.apiUrl) throw this.readyError;
+    return new URL(path, `${this.apiBaseUrl}/`).toString();
+  }
+
+  #persist() {
+    try {
+      if (this.sessionToken) localStorage.setItem(SESSION_STORAGE_KEY, this.sessionToken);
+      else localStorage.removeItem(SESSION_STORAGE_KEY);
+      if (this.account) localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify(this.account));
+      else localStorage.removeItem(ACCOUNT_STORAGE_KEY);
+    } catch (error) {
+      console.warn("Cloud session could not be persisted", error);
+    }
+  }
+
+  #emit() {
+    this.dispatchEvent(new CustomEvent("change", { detail: this.snapshot() }));
+  }
+
+  async #api(path, options = {}) {
+    const headers = new Headers(options.headers || {});
+    if (this.sessionToken) headers.set("Authorization", `Bearer ${this.sessionToken}`);
+    headers.set("X-Requested-With", "XmlHttpRequest");
+
+    let response;
+    try {
+      response = await fetch(this.endpoint(path), { ...options, headers });
+    } catch (error) {
+      throw new GoogleAuthError("Нет связи с сервером синхронизации.", "NETWORK_ERROR", error);
     }
 
+    if (!response.ok) throw await responseError(response);
+    return response;
+  }
+
+  async prepare() {
     if (!this.ready) {
-      if (this.readyError) throw this.readyError;
-      throw new GoogleAuthError(
-        "Google ещё загружается. Повторите через несколько секунд.",
-        "GIS_LOADING",
-      );
+      this.#emit();
+      return this.snapshot();
     }
 
-    if (this.pendingRequest) return this.pendingRequest;
-
-    this.pendingRequest = this.#requestToken(prompt).finally(() => {
-      this.pendingRequest = null;
-    });
-    return this.pendingRequest;
-  }
-
-  async #requestToken(prompt) {
-    const tokenResponse = await new Promise((resolve, reject) => {
-      this.tokenClient = window.google.accounts.oauth2.initTokenClient({
-        client_id: this.clientId,
-        scope: this.scopes,
-        callback: response => {
-          if (response?.error) {
-            reject(
-              new GoogleAuthError(
-                response.error_description || response.error,
-                response.error,
-              ),
-            );
-            return;
-          }
-          resolve(response);
-        },
-        error_callback: error => {
-          reject(
-            new GoogleAuthError(
-              error?.message || "Окно входа Google было закрыто",
-              error?.type || "POPUP_ERROR",
-              error,
-            ),
-          );
-        },
-      });
-
-      this.tokenClient.requestAccessToken({ prompt });
-    });
-
-    const driveScope = "https://www.googleapis.com/auth/drive.appdata";
-    const hasDriveScope = window.google.accounts.oauth2.hasGrantedAllScopes
-      ? window.google.accounts.oauth2.hasGrantedAllScopes(tokenResponse, driveScope)
-      : String(tokenResponse.scope || this.scopes).split(/\s+/).includes(driveScope);
-    if (!hasDriveScope) {
-      throw new GoogleAuthError(
-        "Без разрешения на папку данных Google Drive синхронизация невозможна.",
-        "SCOPE_DENIED",
-      );
+    if (!this.sessionToken) {
+      this.onlineValidated = false;
+      this.#emit();
+      return this.snapshot();
     }
-
-    this.accessToken = tokenResponse.access_token;
-    const expiresInSeconds = Number(tokenResponse.expires_in) || 3600;
-    this.expiresAt = Date.now() + expiresInSeconds * 1000;
-    window.clearTimeout(this.expiryTimer);
-    this.expiryTimer = window.setTimeout(() => {
-      this.invalidate();
-    }, Math.max(0, expiresInSeconds * 1000 - 25_000));
 
     try {
-      this.account = await fetchProfile(this.accessToken);
-      try {
-        localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify(this.account));
-      } catch (_) {
-        // The account label is optional; sync continues when storage is restricted.
-      }
+      const response = await this.#api("api/auth/session");
+      const body = await response.json();
+      this.account = body.account || this.account;
+      this.onlineValidated = true;
+      this.#persist();
     } catch (error) {
-      // Drive still works even if the optional profile endpoint is unavailable.
-      this.account = this.account || { email: "", name: "Google", picture: "" };
-      console.warn("Google profile lookup failed", error);
+      if (error.code === "AUTH_REQUIRED") {
+        this.invalidate({ forgetAccount: false });
+      } else if (error.code === "NETWORK_ERROR") {
+        this.onlineValidated = false;
+      } else {
+        this.readyError = error;
+      }
     }
 
-    this.dispatchEvent(new CustomEvent("change", { detail: this.snapshot() }));
+    this.#emit();
     return this.snapshot();
   }
 
-  invalidate() {
-    window.clearTimeout(this.expiryTimer);
-    this.expiryTimer = 0;
-    this.accessToken = "";
-    this.expiresAt = 0;
-    this.dispatchEvent(new CustomEvent("change", { detail: this.snapshot() }));
+  async connect() {
+    if (!this.ready) throw this.readyError;
+    if (this.pendingConnect) return this.pendingConnect;
+    this.pendingConnect = this.#requestAuthorizationCode().finally(() => {
+      this.pendingConnect = null;
+    });
+    return this.pendingConnect;
   }
 
-  async disconnect({ forgetAccount = false } = {}) {
-    const token = this.accessToken;
-    window.clearTimeout(this.expiryTimer);
-    this.expiryTimer = 0;
-    this.accessToken = "";
-    this.expiresAt = 0;
+  async #requestAuthorizationCode() {
+    await waitForGoogleIdentity();
 
-    if (token && window.google?.accounts?.oauth2?.revoke) {
-      await new Promise(resolve => {
-        window.google.accounts.oauth2.revoke(token, () => resolve());
+    const code = await new Promise((resolve, reject) => {
+      const client = google.accounts.oauth2.initCodeClient({
+        client_id: this.clientId,
+        scope: GOOGLE_SCOPES,
+        include_granted_scopes: true,
+        select_account: true,
+        ux_mode: "popup",
+        callback: response => {
+          if (response?.error || !response?.code) {
+            reject(new GoogleAuthError(
+              response?.error_description || response?.error || "Google не вернул код авторизации",
+              response?.error || "GOOGLE_CODE_MISSING",
+            ));
+            return;
+          }
+          resolve(response.code);
+        },
+        error_callback: error => reject(popupError(error)),
       });
-    }
+      client.requestCode();
+    });
 
-    if (forgetAccount) {
-      this.account = null;
+    const response = await this.#api("api/auth/code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    const result = await response.json();
+
+    this.sessionToken = result.sessionToken;
+    this.account = result.account || null;
+    this.onlineValidated = true;
+    this.#persist();
+    this.#emit();
+    return this.snapshot();
+  }
+
+  invalidate({ forgetAccount = false } = {}) {
+    this.sessionToken = "";
+    this.onlineValidated = false;
+    if (forgetAccount) this.account = null;
+    this.#persist();
+    this.#emit();
+  }
+
+  async disconnect({ forgetAccount = true } = {}) {
+    if (this.sessionToken) {
       try {
-        localStorage.removeItem(ACCOUNT_STORAGE_KEY);
-      } catch (_) {
-        // Ignore restricted storage; the token has already been removed from memory.
+        await this.#api("api/auth/logout", { method: "POST" });
+      } catch (error) {
+        if (error.code !== "NETWORK_ERROR" && error.code !== "AUTH_REQUIRED") throw error;
       }
     }
+    this.invalidate({ forgetAccount });
+  }
 
-    this.dispatchEvent(new CustomEvent("change", { detail: this.snapshot() }));
+  async revokeAccess() {
+    if (!this.sessionToken) return;
+    await this.#api("api/auth/access", { method: "DELETE" });
+    this.invalidate({ forgetAccount: true });
+  }
+
+  async deleteCloudData() {
+    if (!this.sessionToken) return { deletedFiles: 0 };
+    const response = await this.#api("api/cloud-data", { method: "DELETE" });
+    const result = await response.json();
+    this.invalidate({ forgetAccount: true });
+    return result;
   }
 
   snapshot() {
     return {
       ready: this.ready,
       connected: this.isConnected,
-      expiresAt: this.expiresAt || null,
+      onlineValidated: this.onlineValidated,
       account: this.account,
+      apiBaseUrl: this.apiBaseUrl,
+      error: this.readyError,
     };
   }
 }

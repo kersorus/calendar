@@ -21,11 +21,17 @@ export const defaults = Object.freeze({
   shifts: {},
 });
 
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 let state = normalizeState(await loadState(defaults), defaults);
 
-async function persist() {
+async function persist(source = "local") {
   await saveState(state);
-  window.dispatchEvent(new CustomEvent("las-state-changed"));
+  window.dispatchEvent(new CustomEvent("las-state-changed", {
+    detail: { source },
+  }));
 }
 
 window.LaStorage = Object.freeze({
@@ -33,11 +39,11 @@ window.LaStorage = Object.freeze({
 
   async replaceState(nextState) {
     state = normalizeState(nextState, defaults);
-    await persist();
+    await persist("cloud");
   },
 
   async update(mutator) {
-    const draft = state;
+    const draft = clone(state);
     const changed = mutator(draft);
     state = normalizeState(changed !== undefined ? changed : draft, defaults);
     await persist();

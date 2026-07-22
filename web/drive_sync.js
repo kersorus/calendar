@@ -5,7 +5,6 @@ import {
 } from "./migration.js";
 
 const META_STORAGE_KEY = "las_cloud_meta_v2";
-const TOMBSTONE_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -54,16 +53,6 @@ function emptyMeta() {
   };
 }
 
-function recordTime(record) {
-  return parseTime(record?.updatedAt);
-}
-
-function chooseRemoteOnTie(localRecord, remoteRecord) {
-  const localCanonical = json({ deleted: Boolean(localRecord.deleted), value: localRecord.value });
-  const remoteCanonical = json({ deleted: Boolean(remoteRecord.deleted), value: remoteRecord.value });
-  return remoteCanonical > localCanonical;
-}
-
 export class DriveSyncEngine {
   constructor(driveApi, defaults) {
     this.driveApi = driveApi;
@@ -71,6 +60,7 @@ export class DriveSyncEngine {
     this.meta = { ...emptyMeta(), ...(readMeta() || {}) };
     this.meta.shiftUpdatedAt = { ...(this.meta.shiftUpdatedAt || {}) };
     this.meta.shiftDeletedAt = { ...(this.meta.shiftDeletedAt || {}) };
+    this.changeVersion = 0;
   }
 
   #saveMeta() {
@@ -86,13 +76,9 @@ export class DriveSyncEngine {
     if (!this.meta.lastSnapshot) {
       const timestamp = Date.now();
       const empty = normalizeState({}, this.defaults);
-      this.meta.settingsUpdatedAt =
-        json(normalized.settings) === json(empty.settings) ? 0 : timestamp;
-      this.meta.scheduleUpdatedAt =
-        json(normalized.schedule) === json(empty.schedule) ? 0 : timestamp;
-      for (const date of Object.keys(normalized.shifts)) {
-        this.meta.shiftUpdatedAt[date] = timestamp;
-      }
+      this.meta.settingsUpdatedAt = json(normalized.settings) === json(empty.settings) ? 0 : timestamp;
+      this.meta.scheduleUpdatedAt = json(normalized.schedule) === json(empty.schedule) ? 0 : timestamp;
+      for (const date of Object.keys(normalized.shifts)) this.meta.shiftUpdatedAt[date] = timestamp;
       this.meta.lastSnapshot = clone(normalized);
       this.#saveMeta();
     } else {
@@ -107,21 +93,13 @@ export class DriveSyncEngine {
       ? normalizeState(this.meta.lastSnapshot, this.defaults)
       : normalizeState({}, this.defaults);
 
-    if (json(normalized.settings) !== json(previous.settings)) {
-      this.meta.settingsUpdatedAt = timestamp;
-    }
-    if (json(normalized.schedule) !== json(previous.schedule)) {
-      this.meta.scheduleUpdatedAt = timestamp;
-    }
+    if (json(normalized.settings) !== json(previous.settings)) this.meta.settingsUpdatedAt = timestamp;
+    if (json(normalized.schedule) !== json(previous.schedule)) this.meta.scheduleUpdatedAt = timestamp;
 
-    const dates = new Set([
-      ...Object.keys(previous.shifts),
-      ...Object.keys(normalized.shifts),
-    ]);
+    const dates = new Set([...Object.keys(previous.shifts), ...Object.keys(normalized.shifts)]);
     for (const date of dates) {
       const hadValue = Object.prototype.hasOwnProperty.call(previous.shifts, date);
       const hasValue = Object.prototype.hasOwnProperty.call(normalized.shifts, date);
-
       if (hasValue && (!hadValue || json(previous.shifts[date]) !== json(normalized.shifts[date]))) {
         this.meta.shiftUpdatedAt[date] = timestamp;
         delete this.meta.shiftDeletedAt[date];
@@ -132,20 +110,12 @@ export class DriveSyncEngine {
     }
 
     this.meta.lastSnapshot = clone(normalized);
-    this.#pruneTombstones(timestamp);
+    this.changeVersion += 1;
     this.#saveMeta();
     return normalized;
   }
 
-  #pruneTombstones(timestamp = Date.now()) {
-    for (const [date, deletedAt] of Object.entries(this.meta.shiftDeletedAt)) {
-      if (timestamp - Number(deletedAt) > TOMBSTONE_RETENTION_MS) {
-        delete this.meta.shiftDeletedAt[date];
-      }
-    }
-  }
-
-  #localRecord(state, date) {
+  #localShiftRecord(state, date) {
     const deletedAt = Number(this.meta.shiftDeletedAt[date]) || 0;
     const updatedAt = Number(this.meta.shiftUpdatedAt[date]) || 0;
     if (deletedAt >= updatedAt && deletedAt > 0) {
@@ -154,7 +124,7 @@ export class DriveSyncEngine {
     if (Object.prototype.hasOwnProperty.call(state.shifts, date)) {
       return {
         value: clone(state.shifts[date]),
-        updatedAt: nowIso(updatedAt || Date.now()),
+        updatedAt: nowIso(updatedAt),
         deleted: false,
       };
     }
@@ -163,13 +133,13 @@ export class DriveSyncEngine {
 
   buildPayload(state, timestamp = Date.now()) {
     const normalized = this.markLocalChanges(state, timestamp);
-    const shiftDates = new Set([
+    const dates = new Set([
       ...Object.keys(normalized.shifts),
       ...Object.keys(this.meta.shiftDeletedAt),
     ]);
     const shifts = {};
-    for (const date of shiftDates) {
-      const record = this.#localRecord(normalized, date);
+    for (const date of dates) {
+      const record = this.#localShiftRecord(normalized, date);
       if (record) shifts[date] = record;
     }
 
@@ -183,101 +153,86 @@ export class DriveSyncEngine {
       state: {
         settings: {
           value: clone(normalized.settings),
-          updatedAt: nowIso(this.meta.settingsUpdatedAt || timestamp),
+          updatedAt: nowIso(Number(this.meta.settingsUpdatedAt) || 0),
         },
         schedule: {
           value: clone(normalized.schedule),
-          updatedAt: nowIso(this.meta.scheduleUpdatedAt || timestamp),
+          updatedAt: nowIso(Number(this.meta.scheduleUpdatedAt) || 0),
         },
         shifts,
       },
     };
   }
 
-  merge(state, rawRemotePayload) {
-    const local = this.markLocalChanges(state);
-    const remote = migrateCloudPayload(rawRemotePayload, this.defaults);
-    const merged = clone(local);
+  applyPayload(rawPayload) {
+    const payload = migrateCloudPayload(rawPayload, this.defaults);
+    const state = {
+      settings: clone(payload.state.settings?.value || {}),
+      schedule: clone(payload.state.schedule?.value || {}),
+      shifts: {},
+    };
 
-    const remoteSettingsTime = recordTime(remote.state.settings);
-    const localSettingsTime = Number(this.meta.settingsUpdatedAt) || 0;
-    if (remoteSettingsTime > localSettingsTime) {
-      merged.settings = clone(remote.state.settings.value || {});
-      this.meta.settingsUpdatedAt = remoteSettingsTime;
-    }
+    this.meta.settingsUpdatedAt = parseTime(payload.state.settings?.updatedAt);
+    this.meta.scheduleUpdatedAt = parseTime(payload.state.schedule?.updatedAt);
+    this.meta.shiftUpdatedAt = {};
+    this.meta.shiftDeletedAt = {};
 
-    const remoteScheduleTime = recordTime(remote.state.schedule);
-    const localScheduleTime = Number(this.meta.scheduleUpdatedAt) || 0;
-    if (remoteScheduleTime > localScheduleTime) {
-      merged.schedule = clone(remote.state.schedule.value || {});
-      this.meta.scheduleUpdatedAt = remoteScheduleTime;
-    }
-
-    const dates = new Set([
-      ...Object.keys(local.shifts),
-      ...Object.keys(this.meta.shiftDeletedAt),
-      ...Object.keys(remote.state.shifts || {}),
-    ]);
-
-    for (const date of dates) {
-      const localRecord = this.#localRecord(local, date) || {
-        value: null,
-        updatedAt: new Date(0).toISOString(),
-        deleted: true,
-      };
-      const remoteRecord = remote.state.shifts?.[date] || {
-        value: null,
-        updatedAt: new Date(0).toISOString(),
-        deleted: true,
-      };
-      const localTime = recordTime(localRecord);
-      const remoteTime = recordTime(remoteRecord);
-      const remoteWins =
-        remoteTime > localTime ||
-        (remoteTime === localTime && chooseRemoteOnTie(localRecord, remoteRecord));
-      const winner = remoteWins ? remoteRecord : localRecord;
-      const winnerTime = Math.max(localTime, remoteTime);
-
-      if (winner.deleted) {
-        delete merged.shifts[date];
-        delete this.meta.shiftUpdatedAt[date];
-        if (winnerTime > 0) this.meta.shiftDeletedAt[date] = winnerTime;
+    for (const [date, record] of Object.entries(payload.state.shifts || {})) {
+      const timestamp = parseTime(record.updatedAt);
+      if (record.deleted) {
+        this.meta.shiftDeletedAt[date] = timestamp;
       } else {
-        merged.shifts[date] = clone(winner.value || {});
-        this.meta.shiftUpdatedAt[date] = winnerTime || Date.now();
-        delete this.meta.shiftDeletedAt[date];
+        state.shifts[date] = clone(record.value || {});
+        this.meta.shiftUpdatedAt[date] = timestamp;
       }
     }
 
-    const normalizedMerged = normalizeState(merged, this.defaults);
-    this.meta.lastSnapshot = clone(normalizedMerged);
-    this.meta.remoteRevision = remote.revision || null;
+    const normalized = normalizeState(state, this.defaults);
+    this.meta.lastSnapshot = clone(normalized);
+    this.meta.remoteRevision = payload.revision || null;
     this.#saveMeta();
-    return normalizedMerged;
+    return normalized;
   }
 
   async synchronize(state) {
     const normalized = this.initialize(state);
-    const remoteDownload = await this.driveApi.downloadBackup();
-    const merged = remoteDownload
-      ? this.merge(normalized, remoteDownload.payload)
-      : normalized;
-    const payload = this.buildPayload(merged);
-    const uploadedFile = await this.driveApi.uploadBackup(payload, remoteDownload?.file || null);
+    const localPayload = this.buildPayload(normalized);
+    const changeVersionAtStart = this.changeVersion;
+    const remote = await this.driveApi.synchronize(localPayload);
 
-    this.meta.lastSyncAt = new Date().toISOString();
-    this.meta.remoteModifiedTime = uploadedFile.modifiedTime || this.meta.lastSyncAt;
-    this.meta.remoteRevision = payload.revision;
+    // A response produced from an older local snapshot must never overwrite
+    // edits made while the network request was in flight.
+    if (this.changeVersion !== changeVersionAtStart) {
+      return {
+        stale: true,
+        payload: remote.payload,
+        file: remote.file,
+        hadRemoteBackup: Boolean(remote.hadRemoteBackup),
+        recoveredCorruptBackup: Boolean(remote.recoveredCorruptBackup),
+      };
+    }
+
+    const merged = this.applyPayload(remote.payload);
+    this.meta.lastSyncAt = remote.serverTime || new Date().toISOString();
+    this.meta.remoteModifiedTime = remote.file?.modifiedTime || this.meta.lastSyncAt;
+    this.meta.remoteRevision = remote.payload?.revision || null;
     this.meta.lastSnapshot = clone(merged);
     this.#saveMeta();
 
     return {
+      stale: false,
+      changeVersion: changeVersionAtStart,
       state: merged,
-      payload,
-      file: uploadedFile,
-      hadRemoteBackup: Boolean(remoteDownload),
+      payload: remote.payload,
+      file: remote.file,
+      hadRemoteBackup: Boolean(remote.hadRemoteBackup),
+      recoveredCorruptBackup: Boolean(remote.recoveredCorruptBackup),
       lastSyncAt: this.meta.lastSyncAt,
     };
+  }
+
+  hasChangesSince(version) {
+    return this.changeVersion !== version;
   }
 
   snapshot() {

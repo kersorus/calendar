@@ -109,3 +109,42 @@ button[aria-busy="true"] {
   cursor: progress;
   opacity: 0.7;
 }
+
+.cloud-status-badge[data-state="offline"] {
+  background: #eef0f3;
+  color: #4b5563;
+}
+
+.danger-button {
+  color: #b3261e;
+}
+
+.legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+.legal-links a {
+  color: var(--accent, #5d5fef);
+}
+
+.app-footer {
+  margin: 24px 0 8px;
+  padding: 14px 4px calc(12px + env(safe-area-inset-bottom));
+  color: var(--muted, #667085);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.app-footer p {
+  margin: 0 0 8px;
+}
+
+.app-footer a {
+  margin: 0 7px;
+  color: var(--accent, #5d5fef);
+}

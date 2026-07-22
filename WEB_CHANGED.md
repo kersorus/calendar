@@ -1,10 +1,6 @@
-# Salary PWA fix v0.5
+# Salary PWA fix v0.6
 
-Причина:
-- ui.js запускался раньше app.js;
-- LaStorage ещё не существовал;
-- app.js сам импортирует ui.js после создания API.
-
-Исправление:
-- удалён прямой запуск storage.js и ui.js из index.html;
-- загрузка теперь идёт только через app.js.
+Fixed wrong previous bootstrap patch:
+- removed accidental window.LaStorage override from storage.js;
+- kept app.js as the single initializer;
+- ui.js is loaded only after IndexedDB state and LaStorage API are ready.

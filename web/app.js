@@ -1,3 +1,4 @@
+try { window.LASDebugLog && window.LASDebugLog("app.js loaded"); } catch(e) {}
 import {
   loadState,
   saveState,

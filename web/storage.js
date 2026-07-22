@@ -1,3 +1,4 @@
+try { window.LASDebugLog && window.LASDebugLog("storage.js loaded"); } catch(e) {}
 const DB_NAME = "las_salary";
 const DB_VERSION = 1;
 const STORE = "state";

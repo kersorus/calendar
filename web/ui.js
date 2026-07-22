@@ -1,3 +1,4 @@
+try { window.LASDebugLog && window.LASDebugLog("ui.js loaded"); } catch(e) {}
 const storage = window.LaStorage;
 
 let state = storage.getState();

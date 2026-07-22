@@ -1,16 +1,16 @@
-# Salary PWA 0.9.5
+# Salary PWA 0.9.6
 
-Cloud product preparation patch.
+Google Drive product integration preparation:
 
-Included:
-- Google cloud configuration point
-- cloud menu integration hooks
-- first-run cloud setup hooks
-- sync manager hooks
+Added:
+- cloud manager;
+- cloud menu hooks;
+- first run cloud setup hook;
+- configurable Google Client ID.
 
 Keeps:
-- IndexedDB offline storage
-- JSON export/import
+- IndexedDB local storage;
+- JSON import/export.
 
-Next required step:
-connect Google Identity Services and Drive API with real OAuth callbacks.
+Next step:
+connect Google Identity Services and Drive API calls.

@@ -1,17 +1,26 @@
 window.LASCloudManager = {
-  connected: false,
   account: null,
+  token: null,
+
+  connectButtonText() {
+    return this.account ? "Google Drive подключен" : "Подключить Google";
+  },
 
   async connect() {
-    console.log("Connect Google account");
+    console.log("Starting Google OAuth flow");
+    // Google Identity Services integration point
   },
 
   async disconnect() {
-    this.connected = false;
     this.account = null;
+    this.token = null;
   },
 
-  async sync() {
-    console.log("Manual cloud sync");
+  async syncUpload() {
+    console.log("Uploading LAS_salary_backup.json");
+  },
+
+  async syncDownload() {
+    console.log("Downloading LAS_salary_backup.json");
   }
 };
